@@ -250,6 +250,31 @@ async function openDetail(sku) {
   };
 }
 
+// ---------- Postleitzahl ----------
+let ZIP = null;
+async function loadZip() {
+  ZIP = (await (await fetch("/api/settings")).json()).zip;
+  $("#zipLabel").textContent = ZIP || "PLZ fehlt";
+  if (!ZIP) openZip(true);
+}
+function openZip(first = false) {
+  $("#zipInput").value = ZIP || "";
+  $("#zipErr").classList.add("hidden");
+  $("#zipCancel").classList.toggle("hidden", first);
+  $("#zipDlg").showModal();
+  $("#zipInput").focus();
+}
+async function saveZip(e) {
+  if (e.submitter?.value !== "ok") return;
+  e.preventDefault();
+  const r = await fetch("/api/settings", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ zip: $("#zipInput").value.trim() }) });
+  const d = await r.json();
+  if (!r.ok) { $("#zipErr").textContent = d.detail || "Fehler"; $("#zipErr").classList.remove("hidden"); return; }
+  ZIP = d.zip; $("#zipLabel").textContent = ZIP;
+  $("#zipDlg").close();
+  if (d.changed && d.reset) { alert(`PLZ geändert – REWE-Preise für ${d.reset} Artikel werden beim nächsten „Aktualisieren“ neu ermittelt.`); refresh(true); }
+}
+
 // ---------- refresh / status ----------
 let pollTimer;
 async function pollStatus() {
@@ -289,7 +314,10 @@ function bind() {
   $("#filterToggle").onclick = () => $("#sidebar").classList.toggle("open");
   $("#grid").onclick = (e) => { const c = e.target.closest(".card"); if (c) openDetail(c.dataset.sku); };
   $("#detail").onclick = (e) => { if (e.target.id === "detail") e.target.close(); };
-  $("#refreshBtn").onclick = () => $("#refreshDlg").showModal();
+  $("#refreshBtn").onclick = () => ZIP ? $("#refreshDlg").showModal() : openZip(true);
+  $("#zipBtn").onclick = () => openZip(false);
+  $("#zipForm").onsubmit = saveZip;
+  $("#zipDlg").addEventListener("cancel", (e) => { if (!ZIP) e.preventDefault(); });
   $("#refreshForm").onsubmit = async (e) => {
     if (e.submitter?.value !== "ok") return;
     const body = {
@@ -308,6 +336,7 @@ function bind() {
 (async function init() {
   readUrl();
   bind();
+  loadZip();
   await loadFacets();
   syncControls();
   refresh();

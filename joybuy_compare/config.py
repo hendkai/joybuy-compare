@@ -16,8 +16,8 @@ DATA_DIR = Path(os.environ.get("JBC_DATA_DIR", Path.home() / ".local/share/joybu
 DB_PATH = Path(os.environ.get("JBC_DB", DATA_DIR / "joybuy.db")).expanduser()
 PROFILE_DIR = Path(os.environ.get("JBC_PROFILE", DATA_DIR / "browser-profile")).expanduser()
 
-# Postleitzahl for location-dependent shops (REWE).
-ZIP_CODE = os.environ.get("JBC_ZIP", "40213")
+# Postleitzahl for location-dependent shops (REWE) is entered by the user in the web UI
+# (stored in the DB, see db.zip_code()); JBC_ZIP overrides it.
 # Use DNS-over-HTTPS inside the scraping browser. Helps when a local ad-blocking
 # DNS (Pi-hole, AdGuard, NextDNS ...) blocks joybuy / joy-sourcing hosts.
 USE_DOH = _bool("JBC_DOH", True)

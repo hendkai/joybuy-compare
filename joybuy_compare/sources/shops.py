@@ -8,7 +8,7 @@ import logging
 import re
 from urllib.parse import quote_plus
 
-from .. import config
+from .. import config, db
 from ..browser import Browser
 from ..units import parse_price
 
@@ -17,6 +17,10 @@ log = logging.getLogger(__name__)
 
 class ShopBlocked(Exception):
     """Shop answered with a captcha / bot wall."""
+
+
+class ShopUnavailable(ShopBlocked):
+    """Shop can't be used in this run (e.g. missing configuration)."""
 
 
 async def _consent(page, labels=("Alle akzeptieren", "Akzeptieren", "Alle erlauben", "Zustimmen", "Einverstanden")):
@@ -112,14 +116,27 @@ class Rewe(Shop):
                 url: a ? a.href : null, image: img ? img.src : null, ean: m ? m[1] : null, id};
     })"""
 
-    async def _ensure_market(self, page):
+    MARKER = "rewe_zip.txt"
+
+    async def _sync_zip(self, browser) -> str | None:
+        """Forget REWE's chosen market when the user changed the PLZ."""
+        zip_code = db.zip_code()
+        marker = config.PROFILE_DIR / self.MARKER
+        current = marker.read_text().strip() if marker.exists() else None
+        if zip_code and current != zip_code:
+            await browser.ctx.clear_cookies(domain=re.compile(r"rewe\.de$"))
+            marker.unlink(missing_ok=True)
+            log.info("REWE: PLZ %s -> %s, Marktwahl zurückgesetzt", current, zip_code)
+        return zip_code
+
+    async def _ensure_market(self, page, zip_code: str):
         inp = await page.query_selector("#zipCodeInput")
         if not inp or not await inp.is_visible():
             return False
         await _consent(page)
         await page.wait_for_timeout(800)
         await inp.focus()
-        await page.keyboard.type(config.ZIP_CODE, delay=100)
+        await page.keyboard.type(zip_code, delay=100)
         await page.wait_for_timeout(500)
         await page.get_by_text("Abhol- und Lieferservice finden").click(force=True)
         await page.wait_for_timeout(3500)
@@ -130,14 +147,18 @@ class Rewe(Shop):
             except Exception:
                 pass
         await page.wait_for_timeout(3000)
+        (config.PROFILE_DIR / self.MARKER).write_text(zip_code)
         return True
 
     async def search(self, browser, query):
+        zip_code = await self._sync_zip(browser)
+        if not zip_code:
+            raise ShopUnavailable("REWE: keine Postleitzahl gesetzt (beim ersten Besuch der Web-UI eingeben)")
         url = f"https://shop.rewe.de/productList?search={quote_plus(query)}"
         async with browser.page() as page:
             await page.goto(url, wait_until="domcontentloaded", timeout=45000)
             await page.wait_for_timeout(2500)
-            if await self._ensure_market(page):
+            if await self._ensure_market(page, zip_code):
                 await page.goto(url, wait_until="domcontentloaded", timeout=45000)
                 await page.wait_for_timeout(2500)
             await _consent(page)

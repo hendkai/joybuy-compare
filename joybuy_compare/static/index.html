@@ -15,6 +15,7 @@
     <button type="submit">Suchen</button>
   </form>
   <div class="actions">
+    <button id="zipBtn" class="ghost zipbtn" title="Postleitzahl ändern">📍 <span id="zipLabel">PLZ</span></button>
     <button id="filterToggle" class="ghost mobile-only">Filter</button>
     <button id="refreshBtn" class="primary" title="Joybuy neu crawlen und Preise vergleichen">↻ Aktualisieren</button>
   </div>
@@ -106,6 +107,20 @@
     <div class="row end">
       <button value="cancel" class="ghost">Abbrechen</button>
       <button id="rfStart" value="ok" class="primary">Starten</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="zipDlg" class="refresh">
+  <form method="dialog" id="zipForm">
+    <h3>Deine Postleitzahl</h3>
+    <p class="muted">Supermarkt-Preise (z.&nbsp;B. REWE) hängen vom Markt in deiner Nähe ab. Die PLZ wird nur lokal
+      gespeichert und beim Preisvergleich für die Marktauswahl genutzt.</p>
+    <input id="zipInput" inputmode="numeric" pattern="\d{5}" maxlength="5" placeholder="z. B. 71332" required autocomplete="postal-code">
+    <p id="zipErr" class="ziperr hidden"></p>
+    <div class="row end">
+      <button id="zipCancel" value="cancel" class="ghost" formnovalidate>Abbrechen</button>
+      <button value="ok" class="primary">Speichern</button>
     </div>
   </form>
 </dialog>

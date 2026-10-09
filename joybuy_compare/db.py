@@ -71,6 +71,10 @@ CREATE TABLE IF NOT EXISTS price_history (
     ts REAL
 );
 CREATE INDEX IF NOT EXISTS ix_hist ON price_history(sku, shop, ts);
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
 """
 
 
@@ -149,3 +153,20 @@ def save_offer(con, sku: str, shop: str, o: dict | None, query: str, status: str
     )
     if _last_price(con, sku, shop) != o.get("price"):
         con.execute("INSERT INTO price_history VALUES (?,?,?,?)", (sku, shop, o.get("price"), now))
+
+
+def get_setting(key: str, default: str | None = None) -> str | None:
+    with session() as con:
+        r = con.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    return r["value"] if r else default
+
+
+def set_setting(key: str, value: str) -> None:
+    with session() as con:
+        con.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", (key, value))
+
+
+def zip_code() -> str | None:
+    """PLZ entered by the user in the web UI (env JBC_ZIP overrides)."""
+    import os
+    return os.environ.get("JBC_ZIP") or get_setting("zip")

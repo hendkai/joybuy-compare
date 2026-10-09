@@ -38,7 +38,7 @@ uv run jbc run
 # eigene Suchbegriffe, max. 100 Vergleiche
 uv run jbc run kaffee nutella "usb c kabel" --limit 100
 
-# 2. Web-UI starten → http://127.0.0.1:8787
+# 2. Web-UI starten → http://127.0.0.1:8787 (fragt beim ersten Besuch nach deiner PLZ)
 uv run jbc serve
 ```
 
@@ -60,7 +60,7 @@ Weitere Befehle:
 | Variable | Default | Bedeutung |
 |---|---|---|
 | `JBC_DATA_DIR` | `~/.local/share/joybuy-compare` | Datenbank, Browserprofil, Logs |
-| `JBC_ZIP` | `40213` | Postleitzahl für REWE (Preise sind marktabhängig) |
+| `JBC_ZIP` | – | überschreibt die PLZ, die beim ersten Besuch der Web-UI abgefragt wird (REWE-Preise sind marktabhängig) |
 | `JBC_DOH` | `1` | DNS-over-HTTPS im Scraping-Browser – nötig, wenn ein Pi-hole/AdGuard Joybuy-Hosts blockt |
 | `JBC_HEADLESS` | `1` | `0` = Browserfenster anzeigen |
 

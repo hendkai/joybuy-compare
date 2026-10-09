@@ -1,6 +1,7 @@
 """FastAPI backend + static webshop UI."""
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 import time
@@ -168,6 +169,30 @@ def facets(shops: str | None = None):
     }
 
 
+@app.get("/api/settings")
+def get_settings():
+    return {"zip": db.zip_code()}
+
+
+@app.post("/api/settings")
+def post_settings(body: dict = Body(...)):
+    z = str(body.get("zip", "")).strip()
+    if not re.fullmatch(r"\d{5}", z):
+        raise HTTPException(400, "Bitte eine 5-stellige Postleitzahl eingeben")
+    old = db.zip_code()
+    db.set_setting("zip", z)
+    reset = 0
+    if old and old != z:
+        # REWE prices depend on the market -> drop them and queue those products for a fresh comparison
+        with db.session() as con:
+            skus = [r[0] for r in con.execute("SELECT sku FROM searches WHERE shop='rewe'")]
+            con.execute("DELETE FROM offers WHERE shop='rewe'")
+            con.execute("DELETE FROM searches WHERE shop='rewe'")
+            con.executemany("UPDATE products SET compared_at=NULL WHERE sku=?", [(s,) for s in skus])
+            reset = len(skus)
+    return {"zip": z, "changed": old != z, "reset": reset}
+
+
 @app.get("/api/status")
 def status():
     st = read_status()
@@ -182,6 +207,8 @@ def refresh(body: dict = Body(default={})):
     global _proc
     if (_proc and _proc.poll() is None) or status()["running"]:
         raise HTTPException(409, "Aktualisierung läuft bereits")
+    if not db.zip_code():
+        raise HTTPException(400, "Bitte zuerst deine Postleitzahl eingeben")
     if body.get("sku"):
         cmd = [sys.executable, "-m", "joybuy_compare.cli", "compare", "--max-age", "0", "--sku", str(body["sku"])]
     else:

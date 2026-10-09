@@ -140,3 +140,7 @@ a { color: var(--accent); }
   .detail .wrap { grid-template-columns: 1fr; }
   .grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
 }
+
+.zipbtn { white-space: nowrap; }
+#zipInput { font-size: 22px; letter-spacing: .3em; text-align: center; padding: 12px; }
+.ziperr { color: var(--bad); margin: 0; font-size: 14px; }
