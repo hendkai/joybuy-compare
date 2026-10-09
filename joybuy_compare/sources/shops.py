@@ -62,15 +62,15 @@ class Shop:
 
 class Amazon(Shop):
     name, label, color = "amazon", "Amazon", "#ff9900"
-    JS = """() => Array.from(document.querySelectorAll('div[data-component-type="s-search-result"]')).slice(0, 16).map(el => {
+    JS = r"""() => Array.from(document.querySelectorAll('div[data-component-type="s-search-result"]')).slice(0, 16).map(el => {
         const h2 = el.querySelector('h2');
         let title = h2 ? (h2.getAttribute('aria-label') || h2.innerText) : null;
-        if (title) title = title.split('\\n').sort((a, b) => b.length - a.length)[0].replace(/^Gesponserte Anzeige\\s*[–-]\\s*/, '');
+        if (title) title = title.split('\n').sort((a, b) => b.length - a.length)[0].replace(/^Gesponserte Anzeige\s*[–-]\s*/, '');
         const a = el.querySelector('a.a-link-normal[href*="/dp/"]') || el.querySelector('a[href*="/dp/"]');
         const pr = el.querySelector('.a-price:not(.a-text-price) .a-offscreen');
         const unit = Array.from(el.querySelectorAll('span'))
             .map(s => (s.innerText || '').trim())
-            .filter(s => s.length < 40 && /\\u20ac\\s*\\/\\s*\\d*\\s*(kg|g|l|ml|st|stück)\\b/i.test(s))
+            .filter(s => s.length < 40 && /\u20ac\s*\/\s*\d*\s*(kg|g|l|ml|st|stück)\b/i.test(s))
             .sort((x, y) => x.length - y.length)[0];
         const img = el.querySelector('img.s-image');
         const sponsored = !!el.querySelector('.puis-sponsored-label-text, [aria-label*="Gesponsert"]');
@@ -95,7 +95,7 @@ class Amazon(Shop):
 
 class Rewe(Shop):
     name, label, color = "rewe", "REWE", "#cc071e"
-    JS = """() => Array.from(document.querySelectorAll('div[id^="plr-"][class*="a-pt__product-tile_"]')).slice(0, 20).map(el => {
+    JS = r"""() => Array.from(document.querySelectorAll('div[id^="plr-"][class*="a-pt__product-tile_"]')).slice(0, 20).map(el => {
         const id = el.id.replace('plr-', '');
         const t = el.querySelector('h4');
         const a = el.querySelector('a[href*="/shop/p/"]');
@@ -103,7 +103,7 @@ class Rewe(Shop):
         const g = el.querySelector('[id$="-grammage"]');
         const img = el.querySelector('img');
         const lid = (el.querySelector('input[name=listingId]') || {}).value || '';
-        const m = lid.match(/^\\d+-(\\d{8,14})-/);
+        const m = lid.match(/^\d+-(\d{8,14})-/);
         return {title: t ? t.innerText : null, price: pr ? pr.innerText : null, unit_price_text: g ? g.innerText : null,
                 url: a ? a.href : null, image: img ? img.src : null, ean: m ? m[1] : null, id};
     })"""
@@ -177,15 +177,17 @@ class Dm(Shop):
 
 class Idealo(Shop):
     name, label, color = "idealo", "idealo (bester Händler)", "#0a3761"
-    JS = """() => Array.from(document.querySelectorAll('[class*="sr-resultItemTile_"]')).slice(0, 16).map(el => {
+    JS = r"""() => Array.from(document.querySelectorAll('[class*="sr-resultItemTile_"]')).slice(0, 16).map(el => {
         const t = el.querySelector('[class*="productSummary__title"]');
         const a = el.querySelector('a[href]');
         const pr = el.querySelector('[class*="detailedPriceInfo__price"]');
         const bp = el.querySelector('[class*="detailedPriceInfo__basePrice"]');
         const oc = el.querySelector('[class*="detailedPriceInfo__offerCount"]');
         const img = el.querySelector('img');
+        const sm = (el.innerText || '').match(/Verkauf durch:\s*([^\n|]+)/);
         return {title: t ? t.innerText : null, price: pr ? pr.innerText : null, unit_price_text: bp ? bp.innerText : null,
-                url: a ? a.href : null, image: img ? img.src : null, offers: oc ? oc.innerText : null};
+                url: a ? a.href : null, image: img ? img.src : null, offers: oc ? oc.innerText : null,
+                seller: sm ? sm[1].trim() : null};
     })"""
 
     async def search(self, browser, query):
@@ -197,6 +199,8 @@ class Idealo(Shop):
             except Exception:
                 return []
             items = await page.evaluate(self.JS)
+            # idealo also lists Joybuy's own offers ("Verkauf durch: joybuy.de") – never compare Joybuy with itself
+            items = [i for i in items if "joybuy" not in (i.get("seller") or "").lower()]
             return _clean(items)
 
 

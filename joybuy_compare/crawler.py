@@ -97,7 +97,7 @@ def pick_best(p: dict, offers: list[dict]) -> dict | None:
 
 
 async def compare(browser: Browser, shops: list[str], limit: int | None = None, max_age_h: float = 24,
-                  skus: list[str] | None = None) -> int:
+                  skus: list[str] | None = None, only_known: bool = False) -> int:
     cutoff = time.time() - max_age_h * 3600
     with db.session() as con:
         if skus:
@@ -105,7 +105,8 @@ async def compare(browser: Browser, shops: list[str], limit: int | None = None, 
         else:
             rows = con.execute(
                 "SELECT * FROM products WHERE price IS NOT NULL AND (compared_at IS NULL OR compared_at < ?) "
-                "ORDER BY compared_at IS NOT NULL, discount_pct DESC NULLS LAST", (cutoff,)).fetchall()
+                + ("AND compared_at IS NOT NULL " if only_known else "")
+                + "ORDER BY compared_at IS NOT NULL, discount_pct DESC NULLS LAST", (cutoff,)).fetchall()
     # most-sold first: those are the comparisons people care about
     products = sorted((dict(r) for r in rows), key=lambda r: (r["compared_at"] is not None, -_sales(r.get("sales_text"))))
     products = products[: limit or None]

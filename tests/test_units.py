@@ -73,7 +73,7 @@ def test_price_ratio_guard():
 def test_quantity_suffix_multiplier_and_query():
     q = parse_quantity("Trung Nguyen G7 Instantkaffee 3-in-1 16 g × 20")
     assert q.amount == 320
-    assert search_query("CHIN-SU Chilisauce 480 g", "CHIN-SU") == "CHIN-SU chilisauce 480g"
+    assert search_query("CHIN-SU Chilisauce 480 g", "CHIN-SU") == "CHIN-SU Chilisauce 480g"
 
 
 def _m(jb, brand, price, offer, oprice, unit=None):
@@ -101,3 +101,11 @@ def test_true_positives_kept():
     assert _m("Nutella Nuss-Nugat-Creme 750 g", "Nutella", 5.79, "Ferrero Nutella (750g)", 5.59, "(7,45 €/kg)").kind == "exact"
     assert _m("Coca-Cola Zero Sugar Zitrone 6x1,25L", "Coca-Cola", 3.99, "Coca-Cola Zitrone Ohne Zucker 6x1,25l", 8.32)
     assert _m("Monster Energy Mango Loco 12x0,5L", "Monster Energy", 9.99, "Monster Juiced Mango Loco 12x0,5l", 15.99)
+
+
+def test_brand_and_variant_rules():
+    assert _m("Golden Lily Parfüm-Jasmin-Duftreis 18 kg", "Golden Lily", 21.99,
+              "Golden Phoenix Reis Duft, 1er Pack (1 x 18 kg)", 40.0) is None
+    assert _m("Barilla No. 5 Spaghetti Pasta 500g", "Barilla", 1.11,
+              "Barilla Integrale Vollkorn Spaghetti n.5 (500g)", 1.69) is None
+    assert _m("Thinmax Hokkaido Toastbrot 85 g", "Thinmax", 1.69, "Thinmax Goldener Dänischer Toast Keks 85 g", 1.99) is None

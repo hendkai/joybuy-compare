@@ -33,6 +33,7 @@ def main(argv=None):
 
     p_cmp = sub.add_parser("compare", help="Nur Preise vergleichen")
     p_cmp.add_argument("--sku", action="append", help="Nur diese SKU(s)")
+    p_cmp.add_argument("--known", action="store_true", help="Nur bereits verglichene Artikel auffrischen")
     common(p_cmp)
 
     p_srv = sub.add_parser("serve", help="Web-UI starten")
@@ -70,7 +71,7 @@ def main(argv=None):
             crawler.write_status(running=True, error=None)
             try:
                 async with Browser(parallel=a.parallel) as b:
-                    n = await crawler.compare(b, a.shops.split(","), a.limit, a.max_age, skus=a.sku)
+                    n = await crawler.compare(b, a.shops.split(","), a.limit, a.max_age, skus=a.sku, only_known=a.known)
                     print(f"{n} Produkte verglichen")
             finally:
                 crawler.write_status(running=False, phase="idle")

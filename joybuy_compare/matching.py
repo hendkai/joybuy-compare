@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from rapidfuzz import fuzz
 
-from .units import BASE_PER, Quantity, parse_quantity, parse_unit_price, unit_price
+from .units import BASE_PER, UNIT_MAP, Quantity, parse_quantity, parse_unit_price, unit_price
 
 STOP = {
     "der", "die", "das", "und", "mit", "für", "fur", "von", "in", "im", "aus", "zu", "ohne", "the", "and", "for", "with",
@@ -25,7 +25,10 @@ VARIANT_PATTERNS = {
     "alkoholfrei": r"alkoholfrei|\b0[,.]0 ?%",
     "laktosefrei": r"laktosefrei|lactose[ -]?free",
     "mini": r"\bmini\b",
+    "vollkorn": r"vollkorn|integrale|whole ?grain",
 }
+GENERIC_BRAND_WORDS = {"energy", "drink", "drinks", "food", "foods", "company", "cosmetics", "deutschland", "germany",
+                       "group", "services", "official", "store", "shop", "brand", "gmbh", "ag", "co", "international"}
 
 
 def variants(title: str) -> set[str]:
@@ -60,14 +63,25 @@ def model_tokens(title: str) -> set[str]:
 
 
 def search_query(title: str, brand: str | None = None, max_tokens: int = 7) -> str:
-    """Condensed search string: brand + first significant words + size."""
-    toks = [t for t in tokens(title) if not t.isdigit()]
+    """Condensed search string: brand + first significant words (original spelling) + size."""
+    words = []
+    for w in re.findall(r"\w+", title):
+        f = fold(w)
+        if f in STOP or len(f) < 2 or f.isdigit() or f in UNIT_MAP or QTY_RE.fullmatch(f):
+            continue
+        words.append((f, w))
     q: list[str] = []
     if brand:
         btoks = set(tokens(brand)) | {fold(brand).replace("-", "").replace("'", "").replace(" ", "")}
         q.append(brand)
-        toks = [t for t in toks if t not in btoks]
-    q += toks[: max_tokens - len(q)]
+        words = [(f, w) for f, w in words if f not in btoks]
+    seen = set()
+    for f, w in words:
+        if len(q) >= max_tokens:
+            break
+        if f not in seen and not re.fullmatch(r"\d+(?:[.,]\d+)?(?:mg|g|gr|kg|ml|cl|l|ltr|x)?", f):
+            seen.add(f)
+            q.append(w)
     qty = parse_quantity(title)
     if qty and qty.dimension != "count":
         q.append(qty.label().replace(" ", ""))
@@ -145,8 +159,8 @@ def _match(jb_title: str, jb_brand: str | None, jb_price: float, jb_qty: Quantit
         brand_toks = [t for t in tokens(jb_brand) if len(t) > 1]
         btoks = set(brand_toks)
         joined_offer = b.replace(" ", "")
-        if brand_toks and not ("".join(brand_toks) in joined_offer or all(t in joined_offer for t in brand_toks)
-                               or (len(brand_toks[0]) >= 4 and brand_toks[0] in ot)):
+        core = [t for t in brand_toks if t not in GENERIC_BRAND_WORDS] or brand_toks
+        if brand_toks and not ("".join(brand_toks) in joined_offer or all(t in joined_offer for t in core)):
             return None
 
     # variant words (zero, light, bio …) must agree
@@ -157,7 +171,7 @@ def _match(jb_title: str, jb_brand: str | None, jb_price: float, jb_qty: Quantit
     jnb = [t for t in jt if t not in btoks and t not in PARENT_BRANDS]
     onb = [t for t in ot[:12] if t not in btoks and t not in PARENT_BRANDS]
     nb_cov = max(weighted_coverage(jnb, onb), weighted_coverage(onb, jnb))
-    if nb_cov < 0.5:
+    if nb_cov < 0.6:
         return None
 
     jm, om = model_tokens(jb_title), model_tokens(offer_title)
