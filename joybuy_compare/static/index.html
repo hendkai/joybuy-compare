@@ -15,7 +15,7 @@
     <button type="submit">Suchen</button>
   </form>
   <div class="actions">
-    <button id="zipBtn" class="ghost zipbtn" title="Postleitzahl ändern">📍 <span id="zipLabel">PLZ</span></button>
+    <button id="zipBtn" class="ghost zipbtn" title="Einstellungen: PLZ und automatische Aktualisierung">📍 <span id="zipLabel">PLZ</span> · <span id="intervalLabel"></span> ⚙</button>
     <button id="filterToggle" class="ghost mobile-only">Filter</button>
     <button id="refreshBtn" class="primary" title="Joybuy neu crawlen und Preise vergleichen">↻ Aktualisieren</button>
   </div>
@@ -113,10 +113,21 @@
 
 <dialog id="zipDlg" class="refresh">
   <form method="dialog" id="zipForm">
-    <h3>Deine Postleitzahl</h3>
-    <p class="muted">Supermarkt-Preise (z.&nbsp;B. REWE) hängen vom Markt in deiner Nähe ab. Die PLZ wird nur lokal
-      gespeichert und beim Preisvergleich für die Marktauswahl genutzt.</p>
-    <input id="zipInput" inputmode="numeric" pattern="\d{5}" maxlength="5" placeholder="z. B. 71332" required autocomplete="postal-code">
+    <h3 id="zipTitle">Einstellungen</h3>
+    <label>Deine Postleitzahl
+      <input id="zipInput" inputmode="numeric" pattern="\d{5}" maxlength="5" placeholder="PLZ" required autocomplete="postal-code">
+    </label>
+    <p class="muted small">Supermarkt-Preise (z.&nbsp;B. REWE) hängen vom Markt in deiner Nähe ab. Die PLZ bleibt lokal auf deinem Rechner.</p>
+    <label>Preise automatisch aktualisieren
+      <select id="intervalSel">
+        <option value="0">aus (nur per Button)</option>
+        <option value="6">alle 6 Stunden</option>
+        <option value="12">alle 12 Stunden</option>
+        <option value="24">täglich</option>
+        <option value="168">wöchentlich</option>
+      </select>
+    </label>
+    <p class="muted small" id="intervalInfo"></p>
     <p id="zipErr" class="ziperr hidden"></p>
     <div class="row end">
       <button id="zipCancel" value="cancel" class="ghost" formnovalidate>Abbrechen</button>

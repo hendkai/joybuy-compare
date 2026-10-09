@@ -11,12 +11,11 @@ from . import config, db
 from .browser import Browser
 from .matching import jb_quantity, match, search_query
 from .sources import joybuy
-from .sources.shops import SHOPS, ShopBlocked, search_with_retry
+from .sources.shops import GROCERY_SHOPS, SHOPS, ShopBlocked, search_with_retry
 
 log = logging.getLogger(__name__)
 STATUS_FILE = config.DATA_DIR / "status.json"
-GROCERY_SHOPS = {"rewe", "dm"}
-MIN_INTERVAL = {"amazon": 4.0, "idealo": 2.5, "rewe": 1.5, "dm": 1.0}
+MIN_INTERVAL = {"amazon": 4.0, "idealo": 2.5, "rewe": 1.5, "dm": 1.0, "aldi_sued": 1.5, "aldi_nord": 1.5, "lidl": 1.0}
 
 
 def write_status(**kw) -> None:
@@ -96,6 +95,35 @@ def pick_best(p: dict, offers: list[dict]) -> dict | None:
     return min(near, key=lambda c: c["comparable_price"])
 
 
+def queries_for(shop: str, p: dict) -> list[str]:
+    """Search strings to try, most specific first. Supermarket searches are strict, so they get short queries."""
+    t, b = p["title"], p.get("brand")
+    if shop in ("aldi_sued", "aldi_nord"):
+        # ALDI search only finds something with one or two plain words
+        qs = [search_query(t, b, max_tokens=2, with_size=False), search_query(t, b, max_tokens=1, with_size=False)]
+    elif shop in GROCERY_SHOPS:
+        qs = [search_query(t, b, max_tokens=4), search_query(t, b, max_tokens=2)]
+    else:
+        qs = [search_query(p["title"], p.get("brand"))]
+    return list(dict.fromkeys(qs))
+
+
+async def search_and_match(browser: Browser, shop: str, p: dict, throttle: "_Throttle | None" = None
+                           ) -> tuple[str, list[dict], dict | None]:
+    """Search one shop for a Joybuy product; falls back to a shorter query when nothing matches."""
+    raw: list[dict] = []
+    query = ""
+    for query in queries_for(shop, p):
+        if throttle:
+            await throttle.wait(shop)
+        found = await search_with_retry(SHOPS[shop], browser, query)
+        raw += found
+        best = pick_best(p, raw)
+        if best:
+            return query, raw, best
+    return query, raw, None
+
+
 async def compare(browser: Browser, shops: list[str], limit: int | None = None, max_age_h: float = 24,
                   skus: list[str] | None = None, only_known: bool = False) -> int:
     cutoff = time.time() - max_age_h * 3600
@@ -118,26 +146,21 @@ async def compare(browser: Browser, shops: list[str], limit: int | None = None, 
     async def one(p: dict):
         nonlocal done
         q = jb_quantity(p["title"], p.get("price"), p.get("unit_price_text"))
-        query_long = search_query(p["title"], p.get("brand"))
-        query_short = search_query(p["title"], p.get("brand"), max_tokens=4)
         for s in shops:
-            query = query_short if s in GROCERY_SHOPS else query_long
             if s in blocked:
                 continue
             if s in GROCERY_SHOPS and not (q and q.dimension in ("mass", "volume")):
                 continue
-            await throttle.wait(s)
             try:
-                raw = await search_with_retry(SHOPS[s], browser, query)
+                query, raw, best = await search_and_match(browser, s, p, throttle)
             except ShopBlocked as e:
                 log.error("%s blocked us (%s) – skipping it for this run", s, e)
                 blocked.add(s)
                 continue
             except Exception:
                 with db.session() as con:
-                    db.save_offer(con, p["sku"], s, None, query, "error")
+                    db.save_offer(con, p["sku"], s, None, search_query(p["title"], p.get("brand")), "error")
                 continue
-            best = pick_best(p, raw)
             with db.session() as con:
                 db.save_offer(con, p["sku"], s, best, query, "match" if best else "nomatch", raw)
             if best:

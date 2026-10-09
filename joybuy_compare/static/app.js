@@ -109,7 +109,7 @@ function card(p) {
   const offers = (p.offers || []).slice(0, 3).map((o) => {
     const cls = o.comparable_price < p.price ? "cheaper" : "pricier";
     const si = shopInfo(o.shop);
-    return `<div class="cmprow ${cls}"><span class="shop"><i style="background:${si.color}"></i>${esc(si.label.split(" ")[0])}${o.match_kind !== "exact" ? `<span class="kind" title="${KIND[o.match_kind]}">${o.match_kind === "unit" ? "€/kg" : "≈"}</span>` : ""}</span><b>${eur(o.comparable_price)}</b></div>`;
+    return `<div class="cmprow ${cls}"><span class="shop"><i style="background:${si.color}"></i>${esc(si.short || si.label)}${o.match_kind !== "exact" ? `<span class="kind" title="${KIND[o.match_kind]}">${o.match_kind === "unit" ? "€/kg" : "≈"}</span>` : ""}</span><b>${eur(o.comparable_price)}</b></div>`;
   }).join("");
   return `<article class="card" data-sku="${p.sku}">
     <div class="badges">${p.discount_pct ? `<span class="badge disc">−${Math.round(p.discount_pct)} %</span>` : "<span></span>"}
@@ -250,15 +250,31 @@ async function openDetail(sku) {
   };
 }
 
-// ---------- Postleitzahl ----------
-let ZIP = null;
-async function loadZip() {
-  ZIP = (await (await fetch("/api/settings")).json()).zip;
+// ---------- Einstellungen (PLZ, Auto-Update) ----------
+let ZIP = null, SETTINGS = {};
+const IV_LABEL = { 0: "Auto-Update aus", 6: "alle 6 h", 12: "alle 12 h", 24: "täglich", 168: "wöchentlich" };
+const fmtTime = (ts) => new Date(ts * 1000).toLocaleString("de-DE", { weekday: "short", hour: "2-digit", minute: "2-digit" });
+function applySettings(s) {
+  SETTINGS = s; ZIP = s.zip;
   $("#zipLabel").textContent = ZIP || "PLZ fehlt";
+  $("#intervalLabel").textContent = IV_LABEL[s.interval_h] ?? `${s.interval_h} h`;
+}
+async function loadZip() {
+  applySettings(await (await fetch("/api/settings")).json());
   if (!ZIP) openZip(true);
 }
+function intervalInfo() {
+  const v = +$("#intervalSel").value;
+  $("#intervalInfo").textContent = v
+    ? `Läuft, solange „jbc serve“ aktiv ist: holt die Joybuy-Artikel neu und vergleicht bis zu ${SETTINGS.auto_limit} Artikel, deren Vergleich älter als das Intervall ist.` +
+      (v === SETTINGS.interval_h && SETTINGS.next_run ? ` Nächster Lauf: ${fmtTime(SETTINGS.next_run)}.` : "")
+    : "Aktualisierung nur über den Button „Aktualisieren“.";
+}
 function openZip(first = false) {
+  $("#zipTitle").textContent = first ? "Willkommen! Wo kaufst du ein?" : "Einstellungen";
   $("#zipInput").value = ZIP || "";
+  $("#intervalSel").value = String(SETTINGS.interval_h ?? 0);
+  intervalInfo();
   $("#zipErr").classList.add("hidden");
   $("#zipCancel").classList.toggle("hidden", first);
   $("#zipDlg").showModal();
@@ -267,12 +283,13 @@ function openZip(first = false) {
 async function saveZip(e) {
   if (e.submitter?.value !== "ok") return;
   e.preventDefault();
-  const r = await fetch("/api/settings", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ zip: $("#zipInput").value.trim() }) });
+  const r = await fetch("/api/settings", { method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ zip: $("#zipInput").value.trim(), interval_h: +$("#intervalSel").value }) });
   const d = await r.json();
   if (!r.ok) { $("#zipErr").textContent = d.detail || "Fehler"; $("#zipErr").classList.remove("hidden"); return; }
-  ZIP = d.zip; $("#zipLabel").textContent = ZIP;
+  applySettings(d);
   $("#zipDlg").close();
-  if (d.changed && d.reset) { alert(`PLZ geändert – REWE-Preise für ${d.reset} Artikel werden beim nächsten „Aktualisieren“ neu ermittelt.`); refresh(true); }
+  if (d.changed && d.reset) { alert(`PLZ geändert – Supermarkt-Preise für ${d.reset} Artikel werden beim nächsten Aktualisieren neu ermittelt.`); refresh(true); }
 }
 
 // ---------- refresh / status ----------
@@ -291,6 +308,8 @@ async function pollStatus() {
     $("#refreshBtn").disabled = false;
     if (s.error) { bar.className = "statusbar error"; bar.innerHTML = `<b>Fehler:</b> ${esc(s.error)}`; }
     else bar.className = "statusbar hidden";
+    if (s.next_run) $("#refreshBtn").title = `Nächste automatische Aktualisierung: ${fmtTime(s.next_run)}`;
+    pollTimer = setTimeout(pollStatus, 60000);  // picks up automatic runs
     if (bar.dataset.wasRunning === "1") { loadFacets(); refresh(); }
   }
   bar.dataset.wasRunning = s.running ? "1" : "0";
@@ -317,6 +336,7 @@ function bind() {
   $("#refreshBtn").onclick = () => ZIP ? $("#refreshDlg").showModal() : openZip(true);
   $("#zipBtn").onclick = () => openZip(false);
   $("#zipForm").onsubmit = saveZip;
+  $("#intervalSel").onchange = intervalInfo;
   $("#zipDlg").addEventListener("cancel", (e) => { if (!ZIP) e.preventDefault(); });
   $("#refreshForm").onsubmit = async (e) => {
     if (e.submitter?.value !== "ok") return;

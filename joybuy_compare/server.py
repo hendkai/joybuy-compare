@@ -1,6 +1,8 @@
 """FastAPI backend + static webshop UI."""
 from __future__ import annotations
 
+import asyncio
+import logging
 import re
 import subprocess
 import sys
@@ -17,6 +19,7 @@ from .sources.shops import SHOPS
 
 STATIC = Path(__file__).parent / "static"
 app = FastAPI(title="Joybuy Preisvergleich")
+log = logging.getLogger("joybuy_compare.server")
 _proc: subprocess.Popen | None = None
 
 CATEGORY_SQL = "COALESCE(c1.name, c2.name, 'Weitere')"
@@ -164,14 +167,34 @@ def facets(shops: str | None = None):
         "categories": cats,
         "keywords": kws,
         "stats": st,
-        "shops": [{"name": s.name, "label": s.label, "color": s.color, "matches": shop_counts.get(s.name, 0)}
+        "shops": [{"name": s.name, "label": s.label, "short": s.short or s.label, "color": s.color, "matches": shop_counts.get(s.name, 0)}
                   for s in SHOPS.values()],
     }
 
 
+INTERVALS = (0, 6, 12, 24, 168)  # hours; 0 = automatic updates off
+AUTO_LIMIT = 200                  # max. comparisons per automatic run
+
+
+def _interval() -> float:
+    try:
+        return float(db.get_setting("interval_h") or 0)
+    except ValueError:
+        return 0.0
+
+
+def _next_run() -> float | None:
+    iv = _interval()
+    if not iv:
+        return None
+    last = float(db.get_setting("last_auto_run") or 0)
+    return max(last + iv * 3600, time.time()) if last else time.time()
+
+
 @app.get("/api/settings")
 def get_settings():
-    return {"zip": db.zip_code()}
+    return {"zip": db.zip_code(), "interval_h": _interval(), "intervals": INTERVALS, "next_run": _next_run(),
+            "auto_limit": AUTO_LIMIT}
 
 
 @app.post("/api/settings")
@@ -179,18 +202,25 @@ def post_settings(body: dict = Body(...)):
     z = str(body.get("zip", "")).strip()
     if not re.fullmatch(r"\d{5}", z):
         raise HTTPException(400, "Bitte eine 5-stellige Postleitzahl eingeben")
+    if "interval_h" in body:
+        iv = float(body["interval_h"] or 0)
+        if iv not in INTERVALS:
+            raise HTTPException(400, "Ungültiges Intervall")
+        if iv != _interval():
+            db.set_setting("interval_h", str(iv))
+            db.set_setting("last_auto_run", str(time.time()))  # first automatic run one interval from now
     old = db.zip_code()
     db.set_setting("zip", z)
     reset = 0
     if old and old != z:
-        # REWE prices depend on the market -> drop them and queue those products for a fresh comparison
+        # supermarket prices depend on the market -> drop them and queue those products for a fresh comparison
         with db.session() as con:
             skus = [r[0] for r in con.execute("SELECT sku FROM searches WHERE shop='rewe'")]
             con.execute("DELETE FROM offers WHERE shop='rewe'")
             con.execute("DELETE FROM searches WHERE shop='rewe'")
             con.executemany("UPDATE products SET compared_at=NULL WHERE sku=?", [(s,) for s in skus])
             reset = len(skus)
-    return {"zip": z, "changed": old != z, "reset": reset}
+    return {**get_settings(), "changed": old != z, "reset": reset}
 
 
 @app.get("/api/status")
@@ -199,12 +229,21 @@ def status():
     st["running"] = bool(_proc and _proc.poll() is None) or (
         st.get("running") and time.time() - st.get("updated_at", 0) < 600)
     st["default_keywords"] = config.DEFAULT_KEYWORDS
+    st["next_run"] = _next_run()
     return st
+
+
+def _start(cmd: list[str]) -> subprocess.Popen:
+    global _proc
+    log_path = config.DATA_DIR / "refresh.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    write_status(running=True, phase="start", step="Starte …", error=None, done=0, total=0)
+    _proc = subprocess.Popen(cmd, stdout=open(log_path, "w"), stderr=subprocess.STDOUT, start_new_session=True)
+    return _proc
 
 
 @app.post("/api/refresh")
 def refresh(body: dict = Body(default={})):
-    global _proc
     if (_proc and _proc.poll() is None) or status()["running"]:
         raise HTTPException(409, "Aktualisierung läuft bereits")
     if not db.zip_code():
@@ -217,13 +256,32 @@ def refresh(body: dict = Body(default={})):
         cmd += ["--limit", str(int(body["limit"]))]
     if body.get("shops"):
         cmd += ["--shops", ",".join(_shops(body["shops"]))]
-    kws = [k.strip() for k in (body.get("keywords") or []) if k.strip()]
-    cmd += kws
-    log_path = config.DATA_DIR / "refresh.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    write_status(running=True, phase="start", step="Starte …", error=None, done=0, total=0)
-    _proc = subprocess.Popen(cmd, stdout=open(log_path, "w"), stderr=subprocess.STDOUT, start_new_session=True)
-    return {"started": True, "pid": _proc.pid}
+    cmd += [k.strip() for k in (body.get("keywords") or []) if k.strip()]
+    p = _start(cmd)
+    return {"started": True, "pid": p.pid}
+
+
+async def _scheduler():
+    """Automatic updates while `jbc serve` is running."""
+    while True:
+        await asyncio.sleep(60)
+        try:
+            iv = _interval()
+            nxt = _next_run()
+            if not iv or not db.zip_code() or nxt is None or time.time() < nxt or status()["running"]:
+                continue
+            db.set_setting("last_auto_run", str(time.time()))
+            # re-crawl Joybuy and refresh comparisons older than the interval
+            _start([sys.executable, "-m", "joybuy_compare.cli", "run", "--pages", "2", "--limit", str(AUTO_LIMIT),
+                    "--max-age", str(iv)])
+            log.info("automatische Aktualisierung gestartet (alle %g h)", iv)
+        except Exception as e:  # never let the scheduler die
+            log.warning("scheduler: %s", e)
+
+
+@app.on_event("startup")
+async def _startup():
+    asyncio.create_task(_scheduler())
 
 
 @app.get("/")

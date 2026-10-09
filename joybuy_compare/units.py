@@ -74,6 +74,13 @@ def parse_quantity(title: str | None) -> Quantity | None:
     if not title:
         return None
     t = title.lower().replace("\u00a0", " ")
+    t = re.sub(r"(\d)-(?=(?:mg|g|kg|ml|cl|l|liter|stück)\b)", r"\1 ", t)  # "750-g-Glas"
+
+    # "750 + 75 g" (bonus packs)
+    m = re.search(rf"{_NUM}\s*\+\s*{_NUM}\s*({_UNITS_RE})\b", t)
+    if m:
+        dim, f = UNIT_MAP[m.group(3)]
+        return Quantity(dim, (to_float(m.group(1)) + to_float(m.group(2))) * f)
 
     multi = 1
     m = re.search(r"(?:packung|pack|packs?)\s*(?:mit|à|a|von)?\s*(\d+)\b", t) \

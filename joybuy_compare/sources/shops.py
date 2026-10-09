@@ -8,6 +8,8 @@ import logging
 import re
 from urllib.parse import quote_plus
 
+import httpx
+
 from .. import config, db
 from ..browser import Browser
 from ..units import parse_price
@@ -59,6 +61,7 @@ def _clean(items: list[dict]) -> list[dict]:
 class Shop:
     name = "shop"
     label = "Shop"
+    short = ""
     color = "#888"
 
     async def search(self, browser: Browser, query: str) -> list[dict]:
@@ -66,7 +69,7 @@ class Shop:
 
 
 class Amazon(Shop):
-    name, label, color = "amazon", "Amazon", "#ff9900"
+    name, label, short, color = "amazon", "Amazon", "Amazon", "#ff9900"
     JS = r"""() => Array.from(document.querySelectorAll('div[data-component-type="s-search-result"]')).slice(0, 16).map(el => {
         const h2 = el.querySelector('h2');
         let title = h2 ? (h2.getAttribute('aria-label') || h2.innerText) : null;
@@ -102,7 +105,7 @@ class Amazon(Shop):
 
 
 class Rewe(Shop):
-    name, label, color = "rewe", "REWE", "#cc071e"
+    name, label, short, color = "rewe", "REWE", "REWE", "#cc071e"
     JS = r"""() => Array.from(document.querySelectorAll('div[id^="plr-"][class*="a-pt__product-tile_"]')).slice(0, 20).map(el => {
         const id = el.id.replace('plr-', '');
         const t = el.querySelector('h4');
@@ -167,7 +170,7 @@ class Rewe(Shop):
 
 
 class Dm(Shop):
-    name, label, color = "dm", "dm", "#002878"
+    name, label, short, color = "dm", "dm", "dm", "#2d8a3e"
 
     async def search(self, browser, query):
         async with browser.page() as page:
@@ -201,7 +204,7 @@ class Dm(Shop):
 
 
 class Idealo(Shop):
-    name, label, color = "idealo", "idealo (bester Händler)", "#0a3761"
+    name, label, short, color = "idealo", "idealo (bester Händler)", "idealo", "#ff6600"
     JS = r"""() => Array.from(document.querySelectorAll('[class*="sr-resultItemTile_"]')).slice(0, 16).map(el => {
         const t = el.querySelector('[class*="productSummary__title"]');
         const a = el.querySelector('a[href]');
@@ -229,7 +232,110 @@ class Idealo(Shop):
             return _clean(items)
 
 
-SHOPS: dict[str, Shop] = {s.name: s for s in (Amazon(), Rewe(), Dm(), Idealo())}
+class AldiSued(Shop):
+    name, label, short, color = "aldi_sued", "ALDI SÜD", "ALDI S", "#00005f"
+    IMG_WIDTH = 300
+
+    async def search(self, browser, query):
+        async with browser.page() as page:
+            try:
+                want = "q=" + quote_plus(query)
+                async with page.expect_response(lambda r: "api.aldi-sued.de/v3/product-search" in r.url
+                                                and want.lower() in r.url.replace("%20", "+").lower(), timeout=25000) as rv:
+                    await page.goto(f"https://www.aldi-sued.de/produkte?q={quote_plus(query)}",
+                                    wait_until="domcontentloaded", timeout=45000)
+                data = await (await rv.value).json()
+            except Exception as e:
+                log.debug("aldi_sued: %s", e)
+                return []
+        out = []
+        for p in (data.get("data") or [])[:20]:
+            pr = p.get("price") or {}
+            assets = p.get("assets") or []
+            img = assets[0]["url"].replace("{width}", str(self.IMG_WIDTH)).replace("{slug}", p.get("urlSlugText") or "p") \
+                if assets and assets[0].get("url") else None
+            amount = pr.get("amountRelevant") or pr.get("amount")
+            name = p.get("name") or ""
+            size = p.get("sellingSize") or ""
+            if size and re.search(r"\d", name):  # name usually already contains the size
+                size = ""
+            out.append({
+                "title": f"{p.get('brandName') or ''} {name} {size}".strip(),
+                "price": amount / 100 if amount else None,
+                "unit_price_text": pr.get("comparisonDisplay"),
+                "url": f"https://www.aldi-sued.de/produkt/{p.get('urlSlugText')}-{p.get('sku')}" if p.get("sku") else None,
+                "image": img,
+            })
+        return _clean(out)
+
+
+class AldiNord(Shop):
+    name, label, short, color = "aldi_nord", "ALDI Nord", "ALDI N", "#00a0e2"
+    JS = r"""() => Array.from(document.querySelectorAll('div.product-tile')).slice(0, 20).map(el => {
+        const q = (s) => el.querySelector(s);
+        const brand = q('.product-tile__content__upper__brand-name');
+        const name = q('.product-tile__content__upper__product-name');
+        const price = q('.tag__label--price');
+        const unit = q('.tag__marker--salesunit');
+        const base = q('.tag__marker--base-price');
+        const a = q('a.product-tile__action') || q('a[href*="/produkt/"]');
+        const img = q('img');
+        return {title: [brand && brand.innerText, name && name.innerText, unit && unit.innerText].filter(Boolean).join(' '),
+                price: price ? price.innerText : null,
+                unit_price_text: base ? base.innerText.replace(/^\s*(\w+)\s*=\s*([\d.,]+)/, '1 $1 = $2 €') : null,
+                url: a ? a.href : null, image: img ? img.currentSrc || img.src : null};
+    })"""
+
+    async def search(self, browser, query):
+        async with browser.page() as page:
+            await page.goto(f"https://www.aldi-nord.de/suchergebnisse.html?query={quote_plus(query)}",
+                            wait_until="domcontentloaded", timeout=45000)
+            try:
+                await page.wait_for_selector("div.product-tile .tag__label--price", timeout=8000)
+            except Exception:
+                return []
+            items = await page.evaluate(self.JS)
+        for i in items:  # "3.99" is a decimal point price
+            if isinstance(i.get("price"), str):
+                try:
+                    i["price"] = float(i["price"].replace(",", ".").strip())
+                except ValueError:
+                    i["price"] = None
+        return _clean(items)
+
+
+class Lidl(Shop):
+    """lidl.de only sells non-food, drinks and promotional items online – groceries are not listed."""
+    name, label, short, color = "lidl", "Lidl (Onlineshop)", "Lidl", "#0050aa"
+    API = "https://www.lidl.de/q/api/search"
+
+    async def search(self, browser, query):
+        params = {"q": query, "fetchsize": 24, "locale": "de_DE", "assortment": "DE", "version": "v2.0.0"}
+        async with httpx.AsyncClient(timeout=20, headers={"User-Agent": config.USER_AGENT}) as c:
+            r = await c.get(self.API, params=params)
+            r.raise_for_status()
+            data = r.json()
+        out = []
+        for it in data.get("items") or []:
+            g = ((it.get("gridbox") or {}).get("data")) or {}
+            pr = g.get("price") or {}
+            if not g.get("fullTitle") or not pr.get("price"):
+                continue
+            base = (pr.get("basePrice") or {}).get("text")  # "1 l = 6.39"
+            pack = (pr.get("packaging") or {}).get("text")
+            out.append({
+                "title": " ".join(filter(None, [g["fullTitle"], pack])),
+                "price": float(pr["price"]),
+                "unit_price_text": re.sub(r"=\s*([\d.]+)", lambda m: "= " + m.group(1).replace(".", ",") + " €", base) if base else None,
+                "url": "https://www.lidl.de" + g["canonicalUrl"] if g.get("canonicalUrl") else None,
+                "image": g.get("image"),
+            })
+        return _clean(out)
+
+
+SHOPS: dict[str, Shop] = {s.name: s for s in (Amazon(), Rewe(), Dm(), AldiSued(), AldiNord(), Lidl(), Idealo())}
+# supermarkets / drugstores: only searched for products with a weight or volume
+GROCERY_SHOPS = {"rewe", "dm", "aldi_sued", "aldi_nord"}
 
 
 async def search_with_retry(shop: Shop, browser: Browser, query: str, retries: int = 1) -> list[dict]:

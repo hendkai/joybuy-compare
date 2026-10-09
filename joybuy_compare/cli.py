@@ -6,6 +6,7 @@ import asyncio
 import logging
 
 from . import config, db
+from .sources.shops import SHOPS
 
 
 def main(argv=None):
@@ -14,7 +15,7 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     def common(p):
-        p.add_argument("--shops", default="amazon,rewe,dm,idealo", help="Kommagetrennt: amazon,rewe,dm,idealo")
+        p.add_argument("--shops", default=",".join(SHOPS), help=f"Kommagetrennt, Default: {','.join(SHOPS)}")
         p.add_argument("--limit", type=int, default=None, help="Max. Produkte zum Vergleichen")
         p.add_argument("--max-age", type=float, default=24, help="Vergleich erneuern, wenn älter als N Stunden")
         p.add_argument("--parallel", type=int, default=3, help="Parallele Browser-Tabs")

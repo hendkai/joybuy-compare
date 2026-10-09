@@ -1,7 +1,7 @@
 # JoyCheck – Joybuy-Preisvergleich
 
 Ist [Joybuy.de](https://www.joybuy.de) (JD.com Europa) wirklich günstiger? **JoyCheck** crawlt Joybuy-Artikel,
-sucht dieselben Produkte bei **Amazon, REWE, dm und idealo** und zeigt alles in einer Webshop-Oberfläche –
+sucht dieselben Produkte bei **Amazon, REWE, dm, ALDI SÜD, ALDI Nord, Lidl und idealo** und zeigt alles in einer Webshop-Oberfläche –
 mit Filtern für „Joybuy günstiger“, Mindest-Ersparnis, Joybuy-Rabatt (UVP), Kategorie, Preis und Shop.
 
 ![Screenshot](docs/screenshot.png)
@@ -16,6 +16,8 @@ mit Filtern für „Joybuy günstiger“, Mindest-Ersparnis, Joybuy-Rabatt (UVP)
 - **Faire Vergleiche**: Packungsgrößen werden erkannt (`750 g`, `6 x 330 ml`, `3er Pack`, `60 Tabs` …). Bei abweichender
   Größe wird über den **Grundpreis** (€/kg, €/l, €/Stk) auf die Joybuy-Packung umgerechnet
 - **Aktualisieren-Button** in der UI startet Crawl + Vergleich im Hintergrund (mit Fortschrittsanzeige)
+- **Einstellungen** (⚙ oben rechts, beim ersten Besuch automatisch): deine **Postleitzahl** (Marktwahl für REWE) und
+  **automatische Aktualisierung** (aus / 6 h / 12 h / täglich / wöchentlich) – läuft, solange `jbc serve` aktiv ist
 - Preis-Historie in SQLite – bei jedem Lauf werden Änderungen protokolliert
 
 ## Installation
@@ -88,7 +90,7 @@ WantedBy=timers.target
 ```
 joybuy_compare/
 ├── sources/joybuy.py   Joybuy-Suche (Next.js) → fängt die guide_search_getItems-JSON-Antworten der echten Seite ab
-├── sources/shops.py    Amazon / REWE / dm / idealo Scraper (Playwright, DOM bzw. abgefangene JSON-APIs)
+├── sources/shops.py    Amazon / REWE / dm / ALDI SÜD / ALDI Nord / Lidl / idealo (Playwright-DOM, abgefangene JSON-APIs)
 ├── units.py            Preise, Packungsgrößen, Grundpreise parsen
 ├── matching.py         Fuzzy-Matching (Marke, Wortabdeckung, Modellnummern, Packungsgröße)
 ├── crawler.py          Orchestrierung, Throttling pro Shop, Status-Datei für die UI
@@ -99,7 +101,11 @@ joybuy_compare/
 
 - Joybuy liefert **keine EAN**, daher wird über Titel gematcht: Marke muss vorkommen, Modellnummern (z. B. `WH-1000XM5`)
   müssen übereinstimmen, die Wortabdeckung muss passen. Gleiche Packungsgröße wird bevorzugt, sonst Grundpreis-Vergleich.
-- REWE und dm werden nur für Artikel mit Gewichts-/Volumenangabe abgefragt (Lebensmittel/Drogerie).
+- REWE, dm, ALDI SÜD und ALDI Nord werden nur für Artikel mit Gewichts-/Volumenangabe abgefragt (Lebensmittel/Drogerie).
+  ALDI findet nur mit sehr kurzen Suchbegriffen etwas (Marke + 1 Wort, notfalls nur Marke).
+- **Lidl**: lidl.de verkauft online fast nur Non-Food, Getränke-Aktionen und Wein – normale Lebensmittelpreise gibt es nur
+  in der Lidl-Plus-App/im Prospekt und sind daher nicht vergleichbar.
+- ALDI SÜD nutzt die Standardfiliale der Website (das Standardsortiment hat bundesweit einheitliche Preise).
 - idealo liefert den günstigsten Händlerpreis („ab …“, ohne Versand). Angebote, die idealo von Joybuy selbst listet
   („Verkauf durch: joybuy.de“), werden verworfen.
 - Varianten müssen übereinstimmen (Zero/Light/Bio/Vegan/Vollkorn/Laktosefrei …), ebenso die Produktwörter jenseits der

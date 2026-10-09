@@ -48,7 +48,7 @@ def fold(s: str) -> str:
 def tokens(title: str) -> list[str]:
     t = QTY_RE.sub(" ", fold(title))
     t = re.sub(r"[^a-z0-9]+", " ", t)
-    return [w for w in t.split() if w not in STOP and len(w) > 1]
+    return [w for w in t.split() if w not in STOP and len(w) > 1 and not w.isdigit()]
 
 
 def model_tokens(title: str) -> set[str]:
@@ -62,7 +62,7 @@ def model_tokens(title: str) -> set[str]:
     return out
 
 
-def search_query(title: str, brand: str | None = None, max_tokens: int = 7) -> str:
+def search_query(title: str, brand: str | None = None, max_tokens: int = 7, with_size: bool = True) -> str:
     """Condensed search string: brand + first significant words (original spelling) + size."""
     words = []
     for w in re.findall(r"\w+", title):
@@ -83,7 +83,7 @@ def search_query(title: str, brand: str | None = None, max_tokens: int = 7) -> s
             seen.add(f)
             q.append(w)
     qty = parse_quantity(title)
-    if qty and qty.dimension != "count":
+    if with_size and qty and qty.dimension != "count" and qty.pieces == 1:
         q.append(qty.label().replace(" ", ""))
     return " ".join(q)
 
@@ -146,7 +146,9 @@ def _match(jb_title: str, jb_brand: str | None, jb_price: float, jb_qty: Quantit
            offer_title: str, offer_price: float | None, offer_unit_text: str | None = None) -> Match | None:
     if not offer_price or offer_price <= 0:
         return None
-    jt, ot = tokens(jb_title)[:12], tokens(offer_title)
+    # parent brands ("Ferrero Nutella") carry no information about the product itself
+    jt = [t for t in tokens(jb_title) if t not in PARENT_BRANDS][:12]
+    ot = [t for t in tokens(offer_title) if t not in PARENT_BRANDS]
     a, b = " ".join(jt), " ".join(ot)
     if not a or not b:
         return None

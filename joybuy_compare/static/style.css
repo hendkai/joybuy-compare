@@ -144,3 +144,4 @@ a { color: var(--accent); }
 .zipbtn { white-space: nowrap; }
 #zipInput { font-size: 22px; letter-spacing: .3em; text-align: center; padding: 12px; }
 .ziperr { color: var(--bad); margin: 0; font-size: 14px; }
+.muted.small { font-size: 13px; margin: -4px 0 0; }

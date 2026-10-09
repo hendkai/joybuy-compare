@@ -109,3 +109,11 @@ def test_brand_and_variant_rules():
     assert _m("Barilla No. 5 Spaghetti Pasta 500g", "Barilla", 1.11,
               "Barilla Integrale Vollkorn Spaghetti n.5 (500g)", 1.69) is None
     assert _m("Thinmax Hokkaido Toastbrot 85 g", "Thinmax", 1.69, "Thinmax Goldener Dänischer Toast Keks 85 g", 1.99) is None
+
+
+def test_aldi_titles():
+    assert parse_quantity("FERRERO Nutella 750-g-Glas").amount == 750
+    assert parse_quantity("FERRERO Nutella 750 + 75 g").amount == 825
+    assert _m("Nutella Nuss-Nugat-Creme 750 g", "Nutella", 5.79, "FERRERO Nutella 750-g-Glas", 5.79, "1 kg = 7.72 €").kind == "exact"
+    m = _m("Nutella Nuss-Nugat-Creme 750 g", "Nutella", 5.79, "FERRERO Nutella 750 + 75 g", 5.79, "7,02 €/1 kg")
+    assert m.kind == "unit" and abs(m.comparable_price - 5.27) < 0.01
