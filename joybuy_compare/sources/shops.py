@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from urllib.parse import quote_plus
 
 from .. import config
@@ -90,6 +91,9 @@ class Amazon(Shop):
             except Exception:
                 return []
             items = await page.evaluate(self.JS)
+            for i in items:  # "( 17,83 € 17,83€/kg)" -> "17,83 €/kg"
+                m = re.search(r"([\d.,]+)\s*€\s*/\s*([\d.,]*\s*[a-zA-ZäöüÄÖÜ]+)", i.get("unit_price_text") or "")
+                i["unit_price_text"] = f"{m.group(1)} €/{m.group(2).strip()}" if m else None
             return _clean([i for i in items if not i.get("sponsored")])
 
 
