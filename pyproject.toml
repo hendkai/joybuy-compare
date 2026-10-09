@@ -1,0 +1,30 @@
+[project]
+name = "joybuy-compare"
+version = "0.1.0"
+description = "Vergleicht Joybuy.de-Preise mit Amazon, REWE, dm und idealo – inkl. Webshop-UI mit Rabatt-Filtern"
+readme = "README.md"
+license = "MIT"
+authors = [
+    { name = "Hendrik Kaiser", email = "hendrik@kaiser-mail.de" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.143.0",
+    "httpx>=0.28.1",
+    "playwright>=1.63.0",
+    "rapidfuzz>=3.14.6",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[project.scripts]
+jbc = "joybuy_compare.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["uv_build>=0.12.10,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = ""

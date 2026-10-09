@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JoyCheck – Joybuy Preisvergleich</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect rx='8' width='32' height='32' fill='%23e4002b'/><text x='16' y='22' font-size='16' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'>J€</text></svg>">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="logo">J€</span><div><b>JoyCheck</b><small>Joybuy-Preise im Vergleich</small></div></div>
+  <form id="searchForm" class="search">
+    <input id="q" type="search" placeholder="Produkte, Marken durchsuchen …" autocomplete="off">
+    <button type="submit">Suchen</button>
+  </form>
+  <div class="actions">
+    <button id="filterToggle" class="ghost mobile-only">Filter</button>
+    <button id="refreshBtn" class="primary" title="Joybuy neu crawlen und Preise vergleichen">↻ Aktualisieren</button>
+  </div>
+</header>
+
+<div id="statusBar" class="statusbar hidden"></div>
+
+<section id="stats" class="stats"></section>
+
+<main class="layout">
+  <aside id="sidebar" class="sidebar">
+    <div class="fgroup">
+      <h4>Preisvergleich</h4>
+      <label class="radio"><input type="radio" name="compare" value="all" checked> Alle Produkte</label>
+      <label class="radio"><input type="radio" name="compare" value="cheaper"> <span class="dot good"></span>Joybuy günstiger</label>
+      <label class="radio"><input type="radio" name="compare" value="pricier"> <span class="dot bad"></span>Joybuy teurer</label>
+      <label class="radio"><input type="radio" name="compare" value="compared"> Nur mit Vergleichspreis</label>
+      <label class="radio"><input type="radio" name="compare" value="uncompared"> Noch nicht verglichen</label>
+    </div>
+    <div class="fgroup">
+      <h4>Mind. Ersparnis ggü. günstigstem Shop <output id="minSavingsOut">aus</output></h4>
+      <input id="minSavings" type="range" min="0" max="60" step="5" value="0">
+    </div>
+    <div class="fgroup">
+      <h4>Mind. Joybuy-Rabatt (UVP) <output id="minDiscountOut">aus</output></h4>
+      <input id="minDiscount" type="range" min="0" max="80" step="5" value="0">
+    </div>
+    <div class="fgroup">
+      <h4>Vergleichen mit</h4>
+      <div id="shopFilters"></div>
+    </div>
+    <div class="fgroup">
+      <h4>Preis (€)</h4>
+      <div class="pricerange"><input id="priceMin" type="number" min="0" placeholder="von"><span>–</span><input id="priceMax" type="number" min="0" placeholder="bis"></div>
+    </div>
+    <div class="fgroup">
+      <label class="check"><input id="inStock" type="checkbox"> Nur auf Lager</label>
+    </div>
+    <div class="fgroup">
+      <h4>Kategorien</h4>
+      <ul id="categories" class="catlist"></ul>
+    </div>
+    <div class="fgroup">
+      <h4>Suchbegriffe (Crawl)</h4>
+      <ul id="keywords" class="catlist small"></ul>
+    </div>
+    <button id="resetFilters" class="ghost wide">Filter zurücksetzen</button>
+  </aside>
+
+  <section class="content">
+    <div class="toolbar">
+      <div id="resultInfo" class="muted"></div>
+      <div id="activeChips" class="chips"></div>
+      <label class="sort">Sortieren:
+        <select id="sort">
+          <option value="savings">Größte Ersparnis (%)</option>
+          <option value="savings_eur">Größte Ersparnis (€)</option>
+          <option value="discount">Höchster Joybuy-Rabatt</option>
+          <option value="expensive">Joybuy am teuersten</option>
+          <option value="price_asc">Preis aufsteigend</option>
+          <option value="price_desc">Preis absteigend</option>
+          <option value="rating">Beste Bewertung</option>
+          <option value="new">Neu entdeckt</option>
+        </select>
+      </label>
+    </div>
+    <div id="grid" class="grid"></div>
+    <div id="empty" class="empty hidden">
+      <h3>Keine Produkte gefunden</h3>
+      <p>Filter lockern – oder oben auf <b>Aktualisieren</b> klicken, um Joybuy zu crawlen.</p>
+    </div>
+    <div id="sentinel" class="sentinel"></div>
+  </section>
+</main>
+
+<dialog id="detail" class="detail"></dialog>
+
+<dialog id="refreshDlg" class="refresh">
+  <form method="dialog" id="refreshForm">
+    <h3>Daten aktualisieren</h3>
+    <p class="muted">Crawlt Joybuy.de für die Suchbegriffe und sucht jedes Produkt bei den gewählten Shops. Das läuft im Hintergrund und kann je nach Menge eine Weile dauern.</p>
+    <label>Suchbegriffe (einer pro Zeile, leer = Standardliste)
+      <textarea id="rfKeywords" rows="6" placeholder="kaffee&#10;nutella&#10;kopfhörer"></textarea>
+    </label>
+    <div class="row">
+      <label>Seiten je Begriff <input id="rfPages" type="number" min="1" max="10" value="2"></label>
+      <label>Max. Vergleiche <input id="rfLimit" type="number" min="0" placeholder="alle"></label>
+    </div>
+    <div class="row end">
+      <button value="cancel" class="ghost">Abbrechen</button>
+      <button id="rfStart" value="ok" class="primary">Starten</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
