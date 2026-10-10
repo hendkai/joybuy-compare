@@ -66,7 +66,7 @@ Weitere Befehle:
 |---|---|---|
 | `JBC_DATA_DIR` | `~/.local/share/joybuy-compare` | Datenbank, Browserprofil, Logs |
 | `JBC_ZIP` | – | überschreibt die PLZ, die beim ersten Besuch der Web-UI abgefragt wird (REWE-Preise sind marktabhängig) |
-| `JBC_DOH` | `1` | DNS-over-HTTPS im Scraping-Browser – nötig, wenn ein Pi-hole/AdGuard Joybuy-Hosts blockt |
+| `JBC_DOH` | `auto` | DNS-over-HTTPS im Scraping-Browser: `auto` = nur wenn das System-DNS Joybuy nicht auflöst (Pi-hole/AdGuard), `1`/`0` = immer/nie |
 | `JBC_HEADLESS` | `1` | `0` = Browserfenster anzeigen |
 
 ### Täglich automatisch aktualisieren (systemd user timer)
@@ -157,6 +157,23 @@ Empfehlungen, falls du es trotzdem privat einsetzt:
 - bei Captchas/Sperren **nicht umgehen**, sondern pausieren
 - für kommerzielle Nutzung offizielle Schnittstellen bzw. eine schriftliche Genehmigung einholen (z. B. Amazon
   Product Advertising API)
+
+## Kompletter Import & Preisverlauf
+
+```bash
+uv run jbc import          # alle ~580 Joybuy-Kategorien crawlen und alles vergleichen (einmalig, dauert Stunden)
+uv run jbc run --kw-limit 150   # 150 am längsten nicht aktualisierte Kategorien + Vergleich (macht auch das Auto-Update)
+```
+
+- Die Suchbegriffe kommen aus **Joybuys eigenem Kategoriebaum** (wöchentlich neu geladen) plus der eingebauten Liste;
+  eigene Begriffe werden ebenfalls gespeichert. Jeder Lauf nimmt die am längsten nicht abgefragten zuerst – so wird über
+  mehrere Läufe der ganze Katalog regelmäßig aktualisiert.
+- **Preisverlauf**: Jede Preisänderung (Joybuy und alle Vergleichsshops) landet in `price_history`. Im Shop:
+  Filter *Preisentwicklung* (gesunken / gestiegen / bisheriger Tiefstpreis), Sortierung *Größter Preisrückgang* und
+  *Am weitesten unter Ø-Preis*, ⭐-Badge für Tiefstpreise, in der Detailansicht eine Tabelle Jetzt / Vorher / Tiefst /
+  Höchst / Ø pro Shop.
+- Leitet Joybuy auf die Login-Seite um (Soft-Sperre einer „verbrannten“ Session), werden die Joybuy-Cookies automatisch
+  gelöscht und es wird neu angesetzt.
 
 ## Hinweise
 

@@ -20,8 +20,15 @@ PROFILE_DIR = Path(os.environ.get("JBC_PROFILE", DATA_DIR / "browser-profile")).
 # (stored in the DB, see db.zip_code()); JBC_ZIP overrides it.
 # Use DNS-over-HTTPS inside the scraping browser. Helps when a local ad-blocking
 # DNS (Pi-hole, AdGuard, NextDNS ...) blocks joybuy / joy-sourcing hosts.
-USE_DOH = _bool("JBC_DOH", True)
-DOH_TEMPLATE = os.environ.get("JBC_DOH_TEMPLATE", "https://dns.google/dns-query")
+# "auto" (default): only if the system resolver can't resolve Joybuy's hosts; "1"/"0" force it on/off.
+USE_DOH = os.environ.get("JBC_DOH", "auto").strip().lower()
+# DoH servers tried in this order (the first reachable one is used); JBC_DOH_TEMPLATE forces one.
+DOH_TEMPLATES = [t for t in os.environ.get("JBC_DOH_TEMPLATE", "").split(",") if t] or [
+    "https://dns.google/dns-query",
+    "https://cloudflare-dns.com/dns-query",
+    "https://unfiltered.adguard-dns.com/dns-query",
+    "https://dns.quad9.net/dns-query",
+]
 HEADLESS = _bool("JBC_HEADLESS", True)
 USER_AGENT = os.environ.get(
     "JBC_USER_AGENT",

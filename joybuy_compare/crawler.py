@@ -31,28 +31,62 @@ def read_status() -> dict:
         return {}
 
 
-async def crawl_joybuy(browser: Browser, keywords: list[str], pages: int = 2) -> int:
+async def crawl_joybuy(browser: Browser, keywords: list[str], pages: int = 2, parallel: int = 2) -> int:
+    """Crawl Joybuy search results for the given terms (`parallel` tabs at once)."""
     total = 0
-    for i, kw in enumerate(keywords, 1):
-        write_status(phase="joybuy", step=f"Joybuy: „{kw}“", done=i - 1, total=len(keywords))
-        try:
-            products, cats = await joybuy.search(browser, kw, pages=pages)
-        except joybuy.Blocked as e:
-            log.error("%s – stopping Joybuy crawl", e)
-            write_status(error=str(e))
-            break
-        except Exception as e:
-            log.warning("joybuy %r failed: %s", kw, e)
-            continue
-        with db.session() as con:
-            for c in cats:
-                db.upsert_category(con, c["id"], c["name"], c["parent_id"], c["level"])
-            for p in products:
-                db.upsert_product(con, p)
-        total += len(products)
-        log.info("joybuy %r: %d products (%d total)", kw, len(products), total)
-        await asyncio.sleep(1.5)
+    done = 0
+    stop = asyncio.Event()
+    sem = asyncio.Semaphore(max(1, parallel))
+    write_status(phase="joybuy", step="Joybuy-Artikel laden", done=0, total=len(keywords))
+
+    async def one(kw: str):
+        nonlocal total, done
+        if stop.is_set():
+            return
+        async with sem:
+            if stop.is_set():
+                return
+            try:
+                products, cats = await joybuy.search(browser, kw, pages=pages)
+            except joybuy.Blocked as e:
+                log.error("%s – stopping Joybuy crawl", e)
+                write_status(error=str(e))
+                stop.set()
+                return
+            except Exception as e:
+                log.warning("joybuy %r failed: %s", kw, e, exc_info=log.isEnabledFor(logging.DEBUG))
+                return
+            with db.session() as con:
+                for c in cats:
+                    db.upsert_category(con, c["id"], c["name"], c["parent_id"], c["level"])
+                for p in products:
+                    db.upsert_product(con, p)
+            db.mark_keyword(kw, len(products))
+            total += len(products)
+            done += 1
+            write_status(done=done, step=f"Joybuy: „{kw}“ ({len(products)} Artikel)")
+            await asyncio.sleep(1.0)
+
+    if not getattr(browser, "_joybuy_warm", False) and keywords:
+        await one(keywords[0])  # first one alone: warms up the Joybuy session
+        keywords = keywords[1:]
+    await asyncio.gather(*(one(k) for k in keywords))
+    with db.session() as con:
+        n = con.execute("SELECT COUNT(*) FROM products").fetchone()[0]
+    log.info("Joybuy: %d Suchbegriffe, %d Treffer, %d Artikel in der Datenbank", done, total, n)
     return total
+
+
+async def refresh_catalog(browser: Browser, force: bool = False) -> int:
+    """Load Joybuy's category tree into the keyword list (weekly, or when the list is empty)."""
+    last = float(db.get_setting("catalog_loaded") or 0)
+    if not force and time.time() - last < 7 * 86400:
+        return 0
+    terms = await joybuy.catalog_terms(browser)
+    added = db.add_keywords(terms, "catalog") + db.add_keywords(config.DEFAULT_KEYWORDS, "default")
+    db.set_setting("catalog_loaded", str(time.time()))
+    log.info("Joybuy-Kategoriebaum: %d Kategorien, %d neue Suchbegriffe", len(terms), added)
+    return added
 
 
 def _sales(text: str | None) -> float:
@@ -228,12 +262,22 @@ def rematch() -> tuple[int, int]:
 
 
 async def run(keywords: list[str] | None, pages: int, shops: list[str], limit: int | None, max_age_h: float,
-              parallel: int = 6, skip_joybuy: bool = False, skip_compare: bool = False) -> None:
+              parallel: int = 6, skip_joybuy: bool = False, skip_compare: bool = False,
+              kw_limit: int | None = None, kw_max_age_h: float = 0, jb_parallel: int = 2) -> None:
+    """keywords given -> crawl exactly those; otherwise crawl the `kw_limit` least recently crawled terms
+    from the keyword list (Joybuy's whole category tree + default terms)."""
     write_status(running=True, started_at=time.time(), error=None, phase="start", done=0, total=0)
     try:
         async with Browser(parallel=parallel) as browser:
             if not skip_joybuy:
-                await crawl_joybuy(browser, keywords or config.DEFAULT_KEYWORDS, pages)
+                if keywords:
+                    db.add_keywords(keywords, "user")
+                    terms = keywords
+                else:
+                    write_status(phase="joybuy", step="Lade Joybuy-Kategoriebaum")
+                    await refresh_catalog(browser)
+                    terms = db.due_keywords(kw_limit, kw_max_age_h)
+                await crawl_joybuy(browser, terms, pages, parallel=jb_parallel)
             if not skip_compare:
                 await compare(browser, shops, limit=limit, max_age_h=max_age_h)
     except Exception as e:

@@ -22,10 +22,24 @@ def main(argv=None):
         p.add_argument("--parallel", type=int, default=6, help="Artikel, die gleichzeitig verglichen werden")
         p.add_argument("--headed", action="store_true", help="Browserfenster anzeigen (Debug)")
 
+    def crawl_opts(p):
+        p.add_argument("--pages", type=int, default=2,
+                       help="max. Ergebnisseiten pro Suchbegriff (à 40, per Scrollen; meist ~2 verfügbar)")
+        p.add_argument("--kw-limit", type=int, default=None,
+                       help="ohne Suchbegriffe: so viele der am längsten nicht abgefragten Kategorien/Begriffe crawlen")
+        p.add_argument("--kw-max-age", type=float, default=0,
+                       help="ohne Suchbegriffe: nur Begriffe, die älter als N Stunden sind")
+        p.add_argument("--jb-parallel", type=int, default=2, help="parallele Joybuy-Tabs")
+
     p_run = sub.add_parser("run", help="Joybuy crawlen und danach vergleichen")
-    p_run.add_argument("keywords", nargs="*", help="Suchbegriffe (Default: eingebaute Liste)")
-    p_run.add_argument("--pages", type=int, default=2, help="max. Ergebnisseiten pro Suchbegriff (à 40, per Scrollen; meist ~2 verfügbar)")
+    p_run.add_argument("keywords", nargs="*",
+                       help="Suchbegriffe; ohne Angabe: Joybuys kompletter Kategoriebaum (rotierend, siehe --kw-limit)")
+    crawl_opts(p_run)
     common(p_run)
+
+    p_imp = sub.add_parser("import", help="Kompletter Import: alle Joybuy-Kategorien crawlen und alles vergleichen")
+    crawl_opts(p_imp)
+    common(p_imp)
 
     p_crawl = sub.add_parser("crawl", help="Nur Joybuy-Produkte holen")
     p_crawl.add_argument("keywords", nargs="*")
@@ -56,8 +70,10 @@ def main(argv=None):
     from . import crawler
     from .browser import Browser
 
-    if a.cmd == "run":
-        asyncio.run(crawler.run(a.keywords or None, a.pages, a.shops.split(","), a.limit, a.max_age, a.parallel))
+    if a.cmd in ("run", "import"):
+        kws = getattr(a, "keywords", None) or None
+        asyncio.run(crawler.run(kws, a.pages, a.shops.split(","), a.limit, a.max_age, a.parallel,
+                                kw_limit=a.kw_limit, kw_max_age_h=a.kw_max_age, jb_parallel=a.jb_parallel))
     elif a.cmd == "crawl":
         async def _c():
             crawler.write_status(running=True, error=None)
@@ -99,6 +115,8 @@ def main(argv=None):
             print(f"Produkte: {n}, verglichen: {c}")
             for r in con.execute("SELECT shop, COUNT(*) n FROM offers GROUP BY shop"):
                 print(f"  {r['shop']}: {r['n']} Treffer")
+            k = con.execute("SELECT COUNT(*), SUM(last_crawled IS NOT NULL) FROM keywords").fetchone()
+            print(f"Suchbegriffe: {k[0]}, davon schon gecrawlt: {k[1] or 0}")
 
 
 if __name__ == "__main__":

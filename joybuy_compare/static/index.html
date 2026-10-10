@@ -36,6 +36,15 @@
       <label class="radio"><input type="radio" name="compare" value="uncompared"> Noch nicht verglichen</label>
     </div>
     <div class="fgroup">
+      <h4>Preisentwicklung (Joybuy)</h4>
+      <label class="radio"><input type="radio" name="history" value="all" checked> Alle</label>
+      <label class="radio"><input type="radio" name="history" value="dropped"> <span class="dot good"></span>Preis gesunken</label>
+      <label class="radio"><input type="radio" name="history" value="lowest"> ⭐ Bisheriger Tiefstpreis</label>
+      <label class="radio"><input type="radio" name="history" value="raised"> <span class="dot bad"></span>Preis gestiegen</label>
+      <label class="radio"><input type="radio" name="history" value="changed"> Mit Preisänderung</label>
+      <p class="muted small" id="historySince"></p>
+    </div>
+    <div class="fgroup">
       <h4>Mind. Ersparnis ggü. günstigstem Shop <output id="minSavingsOut">aus</output></h4>
       <input id="minSavings" type="range" min="0" max="60" step="5" value="0">
     </div>
@@ -74,6 +83,8 @@
           <option value="savings">Größte Ersparnis (%)</option>
           <option value="savings_eur">Größte Ersparnis (€)</option>
           <option value="discount">Höchster Joybuy-Rabatt</option>
+          <option value="drop">Größter Preisrückgang (Joybuy)</option>
+          <option value="below_avg">Am weitesten unter Ø-Preis</option>
           <option value="expensive">Joybuy am teuersten</option>
           <option value="price_asc">Preis aufsteigend</option>
           <option value="price_desc">Preis absteigend</option>
@@ -96,13 +107,13 @@
 <dialog id="refreshDlg" class="refresh">
   <form method="dialog" id="refreshForm">
     <h3>Daten aktualisieren</h3>
-    <p class="muted">Crawlt Joybuy.de für die Suchbegriffe und sucht jedes Produkt bei den gewählten Shops. Das läuft im Hintergrund und kann je nach Menge eine Weile dauern.</p>
-    <label>Suchbegriffe (einer pro Zeile, leer = Standardliste)
+    <p class="muted">Crawlt Joybuy.de und sucht jedes Produkt bei den gewählten Shops. Ohne eigene Suchbegriffe wird Joybuys kompletter Kategoriebaum (~580 Kategorien) rotierend abgearbeitet – jeweils die am längsten nicht aktualisierten zuerst. Jeder Lauf ergänzt den Preisverlauf.</p>
+    <label>Suchbegriffe (einer pro Zeile, leer = Joybuy-Kategorien)
       <textarea id="rfKeywords" rows="6" placeholder="kaffee&#10;nutella&#10;kopfhörer"></textarea>
     </label>
     <div class="row">
       <label>Seiten je Begriff <input id="rfPages" type="number" min="1" max="10" value="2"></label>
-      <label>Max. Vergleiche <input id="rfLimit" type="number" min="0" value="200" placeholder="alle"></label>
+      <label>Max. Vergleiche <input id="rfLimit" type="number" min="0" value="1000" placeholder="alle"></label>
     </div>
     <div class="row end">
       <button value="cancel" class="ghost">Abbrechen</button>

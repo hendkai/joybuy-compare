@@ -4,12 +4,47 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import socket
 
 from playwright.async_api import BrowserContext, Page, async_playwright
 
 from . import config
 
 log = logging.getLogger(__name__)
+
+
+DOH_TEST_HOSTS = ("www.joybuy.de", "color-api.joybuy.de", "st.joy-sourcing.com", "images1.joy-sourcing.com")
+
+
+def _want_doh() -> bool:
+    mode = config.USE_DOH
+    if mode in ("1", "true", "yes", "on"):
+        return True
+    if mode in ("0", "false", "no", "off"):
+        return False
+    for host in DOH_TEST_HOSTS:  # auto
+        try:
+            socket.getaddrinfo(host, 443)
+        except OSError:
+            log.info("System-DNS löst %s nicht auf – nutze DNS-over-HTTPS im Browser", host)
+            return True
+    return False
+
+
+def _pick_doh() -> str | None:
+    """First DoH server that answers (ad blockers often block some of them)."""
+    import httpx
+    for t in config.DOH_TEMPLATES:
+        try:
+            r = httpx.get(t, params={"name": "www.joybuy.de", "type": "A"}, headers={"accept": "application/dns-json"},
+                          timeout=4)
+            if r.status_code < 500:
+                log.info("DNS-over-HTTPS: %s", t)
+                return t
+        except Exception:
+            continue
+    log.warning("Kein DNS-over-HTTPS-Server erreichbar – nutze System-DNS")
+    return None
 
 
 def _prepare_profile() -> None:
@@ -21,8 +56,9 @@ def _prepare_profile() -> None:
             state = json.loads(local_state.read_text())
         except Exception:
             state = {}
-    if config.USE_DOH:
-        state["dns_over_https"] = {"mode": "secure", "templates": config.DOH_TEMPLATE}
+    template = _pick_doh() if _want_doh() else None
+    if template:
+        state["dns_over_https"] = {"mode": "secure", "templates": template}
     else:
         state.pop("dns_over_https", None)
     local_state.write_text(json.dumps(state))

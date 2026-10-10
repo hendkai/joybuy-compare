@@ -71,6 +71,13 @@ CREATE TABLE IF NOT EXISTS price_history (
     ts REAL
 );
 CREATE INDEX IF NOT EXISTS ix_hist ON price_history(sku, shop, ts);
+CREATE TABLE IF NOT EXISTS keywords (
+    term TEXT PRIMARY KEY,
+    source TEXT,            -- catalog | default | user
+    added REAL,
+    last_crawled REAL,
+    n_items INTEGER
+);
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT
@@ -170,3 +177,29 @@ def zip_code() -> str | None:
     """PLZ entered by the user in the web UI (env JBC_ZIP overrides)."""
     import os
     return os.environ.get("JBC_ZIP") or get_setting("zip")
+
+
+def add_keywords(terms: list[str], source: str) -> int:
+    now = time.time()
+    with session() as con:
+        before = con.execute("SELECT COUNT(*) FROM keywords").fetchone()[0]
+        con.executemany("INSERT OR IGNORE INTO keywords (term, source, added) VALUES (?,?,?)",
+                        [(t.strip(), source, now) for t in terms if t and t.strip()])
+        return con.execute("SELECT COUNT(*) FROM keywords").fetchone()[0] - before
+
+
+def due_keywords(limit: int | None = None, max_age_h: float = 0) -> list[str]:
+    """Least recently crawled search terms first (never crawled before all others)."""
+    cutoff = time.time() - max_age_h * 3600
+    with session() as con:
+        rows = con.execute("SELECT term FROM keywords WHERE last_crawled IS NULL OR last_crawled < ? "
+                           "ORDER BY last_crawled IS NOT NULL, last_crawled, source != 'default', term LIMIT ?",
+                           (cutoff, limit or -1)).fetchall()
+    return [r[0] for r in rows]
+
+
+def mark_keyword(term: str, n_items: int) -> None:
+    with session() as con:
+        con.execute("INSERT INTO keywords (term, source, added, last_crawled, n_items) VALUES (?, 'user', ?, ?, ?) "
+                    "ON CONFLICT(term) DO UPDATE SET last_crawled=excluded.last_crawled, n_items=excluded.n_items",
+                    (term, time.time(), time.time(), n_items))

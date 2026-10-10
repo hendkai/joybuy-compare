@@ -8,14 +8,14 @@ const KIND = { exact: "gleiche Packung", unit: "per Grundpreis", loose: "ähnlic
 
 const state = {
   q: "", category: "", keyword: "", compare: "all", min_savings: 0, min_discount: 0,
-  price_min: "", price_max: "", in_stock: false, sort: "savings", shops: [],
+  price_min: "", price_max: "", in_stock: false, sort: "savings", shops: [], history: "all",
   offset: 0, total: 0, loading: false, done: false,
 };
 let SHOPS = [];
 const shopInfo = (n) => SHOPS.find((s) => s.name === n) || { label: n, color: "#888" };
 
 // ---------- URL state ----------
-const KEYS = ["q", "category", "keyword", "compare", "min_savings", "min_discount", "price_min", "price_max", "in_stock", "sort", "shops"];
+const KEYS = ["q", "category", "keyword", "compare", "history", "min_savings", "min_discount", "price_min", "price_max", "in_stock", "sort", "shops"];
 function readUrl() {
   const p = new URLSearchParams(location.hash.slice(1));
   for (const k of KEYS) {
@@ -33,7 +33,7 @@ function writeUrl() {
     let v = state[k];
     if (k === "shops") v = state.shops.length && state.shops.length < SHOPS.length ? state.shops.join(",") : "";
     if (k === "in_stock") v = state.in_stock ? "1" : "";
-    if (k === "compare" && v === "all") v = "";
+    if ((k === "compare" || k === "history") && v === "all") v = "";
     if (k === "sort" && v === "savings") v = "";
     if (v && v !== 0) p.set(k, v);
   }
@@ -46,6 +46,7 @@ function apiParams(extra = {}) {
   if (state.category) p.set("category", state.category);
   if (state.keyword) p.set("keyword", state.keyword);
   p.set("compare", state.compare);
+  p.set("history", state.history);
   if (state.min_savings > 0) p.set("min_savings", state.min_savings);
   if (state.min_discount > 0) p.set("min_discount", state.min_discount);
   if (state.price_min !== "") p.set("price_min", state.price_min);
@@ -87,9 +88,13 @@ async function loadFacets() {
     <div class="stat good click" data-cmp="cheaper"><b>${s.cheaper ?? 0}${share != null ? ` <small>(${share} %)</small>` : ""}</b><span>Joybuy günstiger</span></div>
     <div class="stat bad click" data-cmp="pricier"><b>${s.pricier ?? 0}</b><span>woanders günstiger</span></div>
     <div class="stat ${s.median_savings > 0 ? "good" : s.median_savings < 0 ? "bad" : ""}"><b>${s.median_savings != null ? Math.abs(Math.round(s.median_savings)) + " %" : "–"}</b><span>${s.median_savings == null ? "Median-Differenz" : s.median_savings >= 0 ? "Joybuy im Median günstiger" : "Joybuy im Median teurer"}</span></div>
-    <div class="stat click" data-sort="discount"><b>${s.discounted ?? 0}</b><span>mit Joybuy-Rabatt</span></div>`;
+    <div class="stat click" data-sort="discount"><b>${s.discounted ?? 0}</b><span>mit Joybuy-Rabatt</span></div>
+    <div class="stat good click" data-hist="dropped"><b>${s.dropped ?? 0}</b><span>Joybuy-Preis gesunken${s.lowest ? ` · ${s.lowest} Tiefstpreise` : ""}</span></div>`;
+  $("#historySince").textContent = s.history_since
+    ? `Preisverlauf wird seit ${new Date(s.history_since * 1000).toLocaleDateString("de-DE")} aufgezeichnet (${s.with_history || 0} Artikel mit Änderungen).` : "";
   $$("#stats .click").forEach((el) => el.onclick = () => {
     if (el.dataset.cmp) state.compare = el.dataset.cmp;
+    if (el.dataset.hist) { state.history = el.dataset.hist; state.sort = "drop"; }
     if (el.dataset.sort) { state.sort = el.dataset.sort; state.min_discount = 5; }
     syncControls(); refresh(true);
   });
@@ -104,6 +109,12 @@ function verdict(p) {
   return { cls: "neutral", short: "gleich teuer", long: `Gleicher Preis wie bei ${sh}` };
 }
 
+const fmtDate = (ts) => new Date(ts * 1000).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" });
+function trend(p) {
+  if (p.jb_change_pct == null || Math.abs(p.jb_change_pct) < 0.5) return "";
+  const down = p.jb_change_pct < 0;
+  return `<span class="trend ${down ? "down" : "up"}" title="vorher ${eur(p.jb_prev)}">${down ? "↓" : "↑"} ${Math.abs(Math.round(p.jb_change_pct))} % seit ${fmtDate(p.jb_changed_at)}</span>`;
+}
 function card(p) {
   const v = verdict(p);
   const offers = (p.offers || []).slice(0, 3).map((o) => {
@@ -112,14 +123,14 @@ function card(p) {
     return `<div class="cmprow ${cls}"><span class="shop"><i style="background:${si.color}"></i>${esc(si.short || si.label)}${o.match_kind !== "exact" ? `<span class="kind" title="${KIND[o.match_kind]}">${o.match_kind === "unit" ? "€/kg" : "≈"}</span>` : ""}</span><b>${eur(o.comparable_price)}</b></div>`;
   }).join("");
   return `<article class="card" data-sku="${p.sku}">
-    <div class="badges">${p.discount_pct ? `<span class="badge disc">−${Math.round(p.discount_pct)} %</span>` : "<span></span>"}
+    <div class="badges">${p.jb_is_low ? `<span class="badge low" title="niedrigster bisher gesehener Joybuy-Preis">⭐ Tiefstpreis</span>` : p.discount_pct ? `<span class="badge disc">−${Math.round(p.discount_pct)} %</span>` : "<span></span>"}
       ${v ? `<span class="badge ${v.cls}">${v.short}</span>` : ""}</div>
     <div class="img"><img loading="lazy" src="${esc(p.image || "")}" alt="" onerror="this.style.visibility='hidden'"></div>
     <div class="body">
       <div class="brandname">${esc(p.brand || p.category || "")}</div>
       <div class="title" title="${esc(p.title)}">${esc(p.title)}</div>
       <div class="priceline"><span class="price">${eur(p.price)}</span>${p.list_price ? `<span class="strike">${eur(p.list_price)}</span>` : ""}</div>
-      <div class="unit">${esc(p.unit_price_text || p.qty_label || "")}</div>
+      <div class="unit">${esc(p.unit_price_text || p.qty_label || "")} ${trend(p)}</div>
       <div class="meta">${p.rating ? `<span>★ ${p.rating}</span>` : ""}${p.sales_text ? `<span>${esc(p.sales_text)}</span>` : ""}${p.in_stock ? "" : `<span style="color:var(--bad)">nicht auf Lager</span>`}</div>
       <div class="cmp">${offers || `<span class="none">${p.compared_at ? "kein Vergleichsangebot gefunden" : "noch nicht verglichen"}</span>`}</div>
     </div></article>`;
@@ -154,11 +165,13 @@ function chips() {
   if (state.min_discount) c.push(["min_discount", `≥ ${state.min_discount} % Rabatt`]);
   if (state.price_min !== "" || state.price_max !== "") c.push(["price", `${state.price_min || 0} – ${state.price_max || "∞"} €`]);
   if (state.in_stock) c.push(["in_stock", "auf Lager"]);
+  if (state.history !== "all") c.push(["history", { dropped: "Preis gesunken", raised: "Preis gestiegen", lowest: "Tiefstpreis", changed: "mit Preisänderung" }[state.history]]);
   $("#activeChips").innerHTML = c.map(([k, l]) => `<span class="chip" data-k="${k}">${esc(l)}</span>`).join("");
   $$("#activeChips .chip").forEach((el) => el.onclick = () => {
     const k = el.dataset.k;
     if (k === "price") { state.price_min = ""; state.price_max = ""; }
     else if (k === "compare") state.compare = "all";
+    else if (k === "history") state.history = "all";
     else if (k === "in_stock") state.in_stock = false;
     else if (k.startsWith("min_")) state[k] = 0;
     else state[k] = "";
@@ -169,6 +182,7 @@ function chips() {
 function syncControls() {
   $("#q").value = state.q;
   $$("input[name=compare]").forEach((r) => r.checked = r.value === state.compare);
+  $$("input[name=history]").forEach((r) => r.checked = r.value === state.history);
   $("#minSavings").value = state.min_savings; $("#minSavingsOut").textContent = state.min_savings ? `≥ ${state.min_savings} %` : "aus";
   $("#minDiscount").value = state.min_discount; $("#minDiscountOut").textContent = state.min_discount ? `≥ ${state.min_discount} %` : "aus";
   $("#priceMin").value = state.price_min; $("#priceMax").value = state.price_max;
@@ -204,6 +218,27 @@ function sparkline(history, product) {
   return `<div class="hist"><h4 style="margin:0 0 6px">Preisverlauf</h4><svg viewBox="0 0 600 120" preserveAspectRatio="none">${paths}</svg><div class="legend">${legend}</div></div>`;
 }
 
+function historyTable(history, p) {
+  const by = {};
+  for (const h of history) if (h.price != null) (by[h.shop] ||= []).push(h);
+  const names = Object.keys(by).sort((a, b) => (a === "joybuy" ? -1 : b === "joybuy" ? 1 : a.localeCompare(b)));
+  if (!names.length) return "";
+  const since = Math.min(...history.map((h) => h.ts));
+  const rows = names.map((shop) => {
+    const pts = by[shop], prices = pts.map((x) => x.price);
+    const cur = pts[pts.length - 1], prev = pts.length > 1 ? pts[pts.length - 2] : null;
+    const min = Math.min(...prices), max = Math.max(...prices), avg = prices.reduce((a, b) => a + b, 0) / prices.length;
+    const ch = prev ? (cur.price - prev.price) / prev.price * 100 : null;
+    const label = shop === "joybuy" ? "Joybuy" : shopInfo(shop).label;
+    return `<tr${shop === "joybuy" ? ' class="jb"' : ""}><td>${esc(label)}</td><td class="num">${eur(cur.price)}${cur.price <= min && prices.length > 1 ? " ⭐" : ""}</td>
+      <td class="num">${prev ? `${eur(prev.price)}<br><small class="trend ${ch < 0 ? "down" : "up"}">${ch < 0 ? "↓" : "↑"} ${Math.abs(ch).toFixed(0)} % · ${fmtDate(cur.ts)}</small>` : "<small class='muted'>unverändert</small>"}</td>
+      <td class="num">${eur(min)}</td><td class="num">${eur(max)}</td><td class="num">${eur(avg)}</td><td class="num">${prices.length}</td></tr>`;
+  });
+  return `<h3 style="margin:18px 0 6px">Preisverlauf</h3>
+    <table class="offers"><thead><tr><th>Shop</th><th class="num">Jetzt</th><th class="num">Vorher</th><th class="num">Tiefst</th><th class="num">Höchst</th><th class="num">Ø</th><th class="num">Preise</th></tr></thead><tbody>${rows.join("")}</tbody></table>
+    <p class="muted" style="font-size:12px">Aufgezeichnet seit ${new Date(since * 1000).toLocaleDateString("de-DE")} – ein Eintrag pro Preisänderung. ⭐ = aktuell niedrigster bisher gesehener Preis. Fremdshop-Preise ohne Packungsumrechnung.</p>`;
+}
+
 async function openDetail(sku) {
   const dlg = $("#detail");
   dlg.innerHTML = `<div style="padding:40px" class="muted">Lade …</div>`;
@@ -234,12 +269,14 @@ async function openDetail(sku) {
         <div class="brandname muted">${esc(p.brand || "")} · ${esc(p.category || "")}</div>
         <h2>${esc(p.title)}</h2>
         <div class="priceline"><span class="price">${eur(p.price)}</span>${p.list_price ? `<span class="strike">UVP ${eur(p.list_price)}</span>` : ""}
-          ${p.discount_pct ? `<span class="badge disc">−${Math.round(p.discount_pct)} %</span>` : ""}</div>
+          ${p.discount_pct ? `<span class="badge disc">−${Math.round(p.discount_pct)} %</span>` : ""}
+          ${p.jb_is_low ? `<span class="badge low">⭐ Tiefstpreis</span>` : ""} ${trend(p)}</div>
         <div class="unit">${esc([p.unit_price_text, p.qty_label, p.discount_text, p.seller].filter(Boolean).join(" · "))}</div>
         <div class="verdict ${v ? v.cls : "neutral"}">${v ? v.long : (p.compared_at ? "Kein vergleichbares Angebot gefunden." : "Noch nicht verglichen.")}</div>
         <table class="offers"><thead><tr><th>Shop</th><th>Artikel</th><th class="num">Preis</th><th class="num">Vergleichbar*</th><th></th></tr></thead><tbody>${rows.join("")}</tbody></table>
         <p class="muted" style="font-size:12px">* auf die Joybuy-Packungsgröße umgerechnet, falls die Packung abweicht (Grundpreis). idealo zeigt den günstigsten Händlerpreis ohne Versand. Zuletzt verglichen: ${p.compared_at ? new Date(p.compared_at * 1000).toLocaleString("de-DE") : "nie"}.</p>
         ${sparkline(d.history, p)}
+        ${historyTable(d.history, p)}
         <div class="btnrow"><a class="primary" href="${esc(p.url)}" target="_blank" rel="noopener">Bei Joybuy ansehen ↗</a>
           <button id="recompare">Jetzt neu vergleichen</button></div>
       </div>
@@ -318,6 +355,7 @@ async function pollStatus() {
 function bind() {
   $("#searchForm").onsubmit = (e) => { e.preventDefault(); state.q = $("#q").value.trim(); refresh(true); };
   $$("input[name=compare]").forEach((r) => r.onchange = () => { state.compare = r.value; refresh(); });
+  $$("input[name=history]").forEach((r) => r.onchange = () => { state.history = r.value; if (r.value !== "all" && state.sort === "savings") { state.sort = "drop"; syncControls(); } refresh(); });
   $("#minSavings").oninput = (e) => { state.min_savings = +e.target.value; $("#minSavingsOut").textContent = state.min_savings ? `≥ ${state.min_savings} %` : "aus"; };
   $("#minSavings").onchange = () => { if (state.min_savings && state.compare === "all") state.compare = "cheaper"; syncControls(); refresh(); };
   $("#minDiscount").oninput = (e) => { state.min_discount = +e.target.value; $("#minDiscountOut").textContent = state.min_discount ? `≥ ${state.min_discount} %` : "aus"; };
@@ -327,7 +365,7 @@ function bind() {
   $("#inStock").onchange = (e) => { state.in_stock = e.target.checked; refresh(); };
   $("#sort").onchange = (e) => { state.sort = e.target.value; refresh(); };
   $("#resetFilters").onclick = () => {
-    Object.assign(state, { q: "", category: "", keyword: "", compare: "all", min_savings: 0, min_discount: 0, price_min: "", price_max: "", in_stock: false, sort: "savings", shops: SHOPS.map((s) => s.name) });
+    Object.assign(state, { history: "all", q: "", category: "", keyword: "", compare: "all", min_savings: 0, min_discount: 0, price_min: "", price_max: "", in_stock: false, sort: "savings", shops: SHOPS.map((s) => s.name) });
     syncControls(); refresh(true);
   };
   $("#filterToggle").onclick = () => $("#sidebar").classList.toggle("open");

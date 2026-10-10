@@ -32,6 +32,8 @@ SORTS = {
     "rating": "p.rating IS NULL, p.rating DESC",
     "expensive": "savings_pct IS NULL, savings_pct ASC",
     "new": "p.first_seen DESC",
+    "drop": "jb_change_pct IS NULL, jb_change_pct ASC",          # biggest Joybuy price drop first
+    "below_avg": "jb_vs_avg_pct IS NULL, jb_vs_avg_pct ASC",     # furthest below its own average
 }
 
 
@@ -44,12 +46,25 @@ def _base_query(shops: list[str]) -> tuple[str, list]:
                 ORDER BY comparable_price LIMIT 1) AS best_shop,
                COUNT(*) AS n_offers
         FROM offers o WHERE shop IN ({ph}) GROUP BY sku
+    ),
+    hist AS (  -- Joybuy's own price history (one row per price change)
+        SELECT sku, MIN(price) AS jb_min, MAX(price) AS jb_max, ROUND(AVG(price), 2) AS jb_avg, COUNT(*) AS jb_n,
+               MAX(CASE WHEN rn = 2 THEN price END) AS jb_prev, MAX(CASE WHEN rn = 1 THEN ts END) AS jb_changed_at,
+               MIN(ts) AS jb_since
+        FROM (SELECT sku, price, ts, ROW_NUMBER() OVER (PARTITION BY sku ORDER BY ts DESC) AS rn
+              FROM price_history WHERE shop = 'joybuy' AND price IS NOT NULL)
+        GROUP BY sku
     )
     SELECT p.*, {CATEGORY_SQL} AS category, b.best_price, b.best_shop, COALESCE(b.n_offers, 0) AS n_offers,
+           h.jb_min, h.jb_max, h.jb_avg, h.jb_n, h.jb_prev, h.jb_changed_at, h.jb_since,
+           CASE WHEN h.jb_prev > 0 THEN ROUND((p.price - h.jb_prev) / h.jb_prev * 100, 1) END AS jb_change_pct,
+           CASE WHEN h.jb_n >= 2 AND h.jb_avg > 0 THEN ROUND((p.price - h.jb_avg) / h.jb_avg * 100, 1) END AS jb_vs_avg_pct,
+           CASE WHEN h.jb_n >= 2 AND p.price <= h.jb_min THEN 1 ELSE 0 END AS jb_is_low,
            CASE WHEN b.best_price > 0 THEN ROUND((b.best_price - p.price) / b.best_price * 100, 1) END AS savings_pct,
            CASE WHEN b.best_price > 0 THEN ROUND(b.best_price - p.price, 2) END AS savings_eur
     FROM products p
     LEFT JOIN best b ON b.sku = p.sku
+    LEFT JOIN hist h ON h.sku = p.sku
     LEFT JOIN categories c1 ON c1.id = p.category_id1
     LEFT JOIN categories c2 ON c2.id = p.category_id2
     """
@@ -73,6 +88,7 @@ def products(
     price_min: float | None = None,
     price_max: float | None = None,
     in_stock: bool = False,
+    history: str = Query("all", pattern="^(all|dropped|raised|lowest|changed)$"),
     sort: str = "savings",
     offset: int = 0,
     limit: int = Query(48, le=200),
@@ -112,6 +128,14 @@ def products(
         wp.append(price_max)
     if in_stock:
         where.append("p.in_stock = 1")
+    if history == "dropped":
+        where.append("h.jb_prev IS NOT NULL AND p.price < h.jb_prev")
+    elif history == "raised":
+        where.append("h.jb_prev IS NOT NULL AND p.price > h.jb_prev")
+    elif history == "lowest":
+        where.append("h.jb_n >= 2 AND p.price <= h.jb_min")
+    elif history == "changed":
+        where.append("h.jb_n >= 2")
     inner = base + (" WHERE " + " AND ".join(where) if where else "")
     order = SORTS.get(sort, SORTS["savings"]).replace("p.", "")
     with db.session() as con:
@@ -159,7 +183,10 @@ def facets(shops: str | None = None):
             f"SELECT COUNT(*) AS products, SUM(compared_at IS NOT NULL) AS compared, SUM(best_price IS NOT NULL) AS matched, "
             f"SUM(best_price > price) AS cheaper, SUM(best_price < price) AS pricier, "
             f"ROUND(AVG(CASE WHEN best_price IS NOT NULL THEN savings_pct END), 1) AS avg_savings, "
-            f"SUM(discount_pct > 0) AS discounted, MAX(updated_at) AS last_update FROM ({base})", params).fetchone())
+            f"SUM(discount_pct > 0) AS discounted, MAX(updated_at) AS last_update, "
+            f"SUM(jb_prev IS NOT NULL AND price < jb_prev) AS dropped, SUM(jb_prev IS NOT NULL AND price > jb_prev) AS raised, "
+            f"SUM(jb_is_low) AS lowest, SUM(jb_n >= 2) AS with_history, MIN(jb_since) AS history_since "
+            f"FROM ({base})", params).fetchone())
         vals = sorted(r[0] for r in con.execute(f"SELECT savings_pct FROM ({base}) WHERE savings_pct IS NOT NULL", params))
         st["median_savings"] = (vals[len(vals) // 2] if len(vals) % 2 else round((vals[len(vals) // 2 - 1] + vals[len(vals) // 2]) / 2, 1)) if vals else None
         shop_counts = {r["shop"]: r["n"] for r in con.execute("SELECT shop, COUNT(*) n FROM offers GROUP BY shop")}
@@ -173,7 +200,8 @@ def facets(shops: str | None = None):
 
 
 INTERVALS = (0, 6, 12, 24, 168)  # hours; 0 = automatic updates off
-AUTO_LIMIT = 200                  # max. comparisons per automatic run
+AUTO_LIMIT = 1000                 # max. comparisons per automatic run
+AUTO_KW = 150                     # Joybuy categories/search terms per automatic run (rotating, oldest first)
 
 
 def _interval() -> float:
@@ -252,6 +280,8 @@ def refresh(body: dict = Body(default={})):
         cmd = [sys.executable, "-m", "joybuy_compare.cli", "compare", "--max-age", "0", "--sku", str(body["sku"])]
     else:
         cmd = [sys.executable, "-m", "joybuy_compare.cli", "run", "--pages", str(int(body.get("pages", 2)))]
+        if not body.get("keywords"):
+            cmd += ["--kw-limit", str(int(body.get("kw_limit") or AUTO_KW))]
     if body.get("limit") and not body.get("sku"):
         cmd += ["--limit", str(int(body["limit"]))]
     if body.get("shops"):
@@ -272,8 +302,9 @@ async def _scheduler():
                 continue
             db.set_setting("last_auto_run", str(time.time()))
             # re-crawl Joybuy and refresh comparisons older than the interval
-            _start([sys.executable, "-m", "joybuy_compare.cli", "run", "--pages", "2", "--limit", str(AUTO_LIMIT),
-                    "--max-age", str(iv)])
+            # rotate through Joybuy's whole category tree (oldest terms first) -> every product's price history grows
+            _start([sys.executable, "-m", "joybuy_compare.cli", "run", "--pages", "2", "--kw-limit", str(AUTO_KW),
+                    "--limit", str(AUTO_LIMIT), "--max-age", str(iv)])
             log.info("automatische Aktualisierung gestartet (alle %g h)", iv)
         except Exception as e:  # never let the scheduler die
             log.warning("scheduler: %s", e)
