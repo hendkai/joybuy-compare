@@ -31,7 +31,15 @@ def read_status() -> dict:
         return {}
 
 
-async def crawl_joybuy(browser: Browser, keywords: list[str], pages: int = 2, parallel: int = 2) -> int:
+JOYBUY_PAUSE = 20.0       # seconds between two Joybuy searches (Joybuy blocks the IP after ~15 quick searches)
+JOYBUY_COOLDOWN_H = 12    # after a block: no Joybuy crawling for this long (comparisons still run)
+
+
+def joybuy_blocked_until() -> float:
+    return float(db.get_setting("joybuy_blocked_until") or 0)
+
+
+async def crawl_joybuy(browser: Browser, keywords: list[str], pages: int = 2, parallel: int = 1) -> int:
     """Crawl Joybuy search results for the given terms (`parallel` tabs at once)."""
     total = 0
     done = 0
@@ -49,8 +57,10 @@ async def crawl_joybuy(browser: Browser, keywords: list[str], pages: int = 2, pa
             try:
                 products, cats = await joybuy.search(browser, kw, pages=pages)
             except joybuy.Blocked as e:
-                log.error("%s – stopping Joybuy crawl", e)
-                write_status(error=str(e))
+                until = time.time() + JOYBUY_COOLDOWN_H * 3600
+                db.set_setting("joybuy_blocked_until", str(until))
+                log.error("%s – stopping Joybuy crawl, pausing Joybuy until %s", e, time.strftime("%d.%m. %H:%M", time.localtime(until)))
+                write_status(error=f"Joybuy hat gedrosselt – Joybuy-Crawl pausiert bis {time.strftime('%d.%m. %H:%M', time.localtime(until))} (Vergleiche laufen weiter)")
                 stop.set()
                 return
             except Exception as e:
@@ -65,7 +75,7 @@ async def crawl_joybuy(browser: Browser, keywords: list[str], pages: int = 2, pa
             total += len(products)
             done += 1
             write_status(done=done, step=f"Joybuy: „{kw}“ ({len(products)} Artikel)")
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(JOYBUY_PAUSE)
 
     if not getattr(browser, "_joybuy_warm", False) and keywords:
         await one(keywords[0])  # first one alone: warms up the Joybuy session
@@ -263,12 +273,16 @@ def rematch() -> tuple[int, int]:
 
 async def run(keywords: list[str] | None, pages: int, shops: list[str], limit: int | None, max_age_h: float,
               parallel: int = 6, skip_joybuy: bool = False, skip_compare: bool = False,
-              kw_limit: int | None = None, kw_max_age_h: float = 0, jb_parallel: int = 2) -> None:
+              kw_limit: int | None = None, kw_max_age_h: float = 0, jb_parallel: int = 1) -> None:
     """keywords given -> crawl exactly those; otherwise crawl the `kw_limit` least recently crawled terms
     from the keyword list (Joybuy's whole category tree + default terms)."""
     write_status(running=True, started_at=time.time(), error=None, phase="start", done=0, total=0)
     try:
         async with Browser(parallel=parallel) as browser:
+            if not skip_joybuy and joybuy_blocked_until() > time.time():
+                log.warning("Joybuy-Crawl pausiert bis %s (Drosselung) – nur Vergleiche",
+                            time.strftime("%d.%m. %H:%M", time.localtime(joybuy_blocked_until())))
+                skip_joybuy = True
             if not skip_joybuy:
                 if keywords:
                     db.add_keywords(keywords, "user")

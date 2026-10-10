@@ -29,7 +29,7 @@ def main(argv=None):
                        help="ohne Suchbegriffe: so viele der am längsten nicht abgefragten Kategorien/Begriffe crawlen")
         p.add_argument("--kw-max-age", type=float, default=0,
                        help="ohne Suchbegriffe: nur Begriffe, die älter als N Stunden sind")
-        p.add_argument("--jb-parallel", type=int, default=2, help="parallele Joybuy-Tabs")
+        p.add_argument("--jb-parallel", type=int, default=1, help="parallele Joybuy-Tabs")
 
     p_run = sub.add_parser("run", help="Joybuy crawlen und danach vergleichen")
     p_run.add_argument("keywords", nargs="*",

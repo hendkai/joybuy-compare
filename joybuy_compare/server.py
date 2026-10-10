@@ -201,7 +201,7 @@ def facets(shops: str | None = None):
 
 INTERVALS = (0, 6, 12, 24, 168)  # hours; 0 = automatic updates off
 AUTO_LIMIT = 1000                 # max. comparisons per automatic run
-AUTO_KW = 150                     # Joybuy categories/search terms per automatic run (rotating, oldest first)
+AUTO_KW = 12                      # Joybuy categories/search terms per automatic run (rotating, oldest first)
 
 
 def _interval() -> float:

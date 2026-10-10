@@ -161,8 +161,8 @@ Empfehlungen, falls du es trotzdem privat einsetzt:
 ## Kompletter Import & Preisverlauf
 
 ```bash
-uv run jbc import          # alle ~580 Joybuy-Kategorien crawlen und alles vergleichen (einmalig, dauert Stunden)
-uv run jbc run --kw-limit 150   # 150 am längsten nicht aktualisierte Kategorien + Vergleich (macht auch das Auto-Update)
+uv run jbc run --kw-limit 12   # 12 am längsten nicht aktualisierte Kategorien + Vergleich (= Auto-Update)
+uv run jbc import              # alle ~580 Kategorien am Stück – Joybuy drosselt dabei meist nach ~15 Suchen!
 ```
 
 - Die Suchbegriffe kommen aus **Joybuys eigenem Kategoriebaum** (wöchentlich neu geladen) plus der eingebauten Liste;
@@ -172,6 +172,9 @@ uv run jbc run --kw-limit 150   # 150 am längsten nicht aktualisierte Kategorie
   Filter *Preisentwicklung* (gesunken / gestiegen / bisheriger Tiefstpreis), Sortierung *Größter Preisrückgang* und
   *Am weitesten unter Ø-Preis*, ⭐-Badge für Tiefstpreise, in der Detailansicht eine Tabelle Jetzt / Vorher / Tiefst /
   Höchst / Ø pro Shop.
+- **Joybuy drosselt per IP**: nach ~15 schnellen Suchen leitet es jede Suche auf die Login-Seite um (auch mit frischem
+  Profil). Deshalb: nur 1 Joybuy-Tab, 20 s Pause zwischen Suchen, 12 Kategorien pro Auto-Lauf (bei 6-h-Intervall ist
+  der ganze Katalog in ~12 Tagen durch). Nach einer Sperre pausiert der Joybuy-Teil 12 h, Vergleiche laufen weiter.
 - Leitet Joybuy auf die Login-Seite um (Soft-Sperre einer „verbrannten“ Session), werden die Joybuy-Cookies automatisch
   gelöscht und es wird neu angesetzt.
 
