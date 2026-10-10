@@ -6,7 +6,7 @@ import asyncio
 import logging
 
 from . import config, db
-from .sources.shops import SHOPS
+from .sources.shops import DEFAULT_SHOPS, SHOPS
 
 
 def main(argv=None):
@@ -15,15 +15,16 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     def common(p):
-        p.add_argument("--shops", default=",".join(SHOPS), help=f"Kommagetrennt, Default: {','.join(SHOPS)}")
+        p.add_argument("--shops", default=",".join(DEFAULT_SHOPS),
+                       help=f"Kommagetrennt, Default: {','.join(DEFAULT_SHOPS)} (verfügbar: {','.join(SHOPS)})")
         p.add_argument("--limit", type=int, default=None, help="Max. Produkte zum Vergleichen")
         p.add_argument("--max-age", type=float, default=24, help="Vergleich erneuern, wenn älter als N Stunden")
-        p.add_argument("--parallel", type=int, default=3, help="Parallele Browser-Tabs")
+        p.add_argument("--parallel", type=int, default=6, help="Artikel, die gleichzeitig verglichen werden")
         p.add_argument("--headed", action="store_true", help="Browserfenster anzeigen (Debug)")
 
     p_run = sub.add_parser("run", help="Joybuy crawlen und danach vergleichen")
     p_run.add_argument("keywords", nargs="*", help="Suchbegriffe (Default: eingebaute Liste)")
-    p_run.add_argument("--pages", type=int, default=2, help="Ergebnisseiten pro Suchbegriff (à 40)")
+    p_run.add_argument("--pages", type=int, default=2, help="max. Ergebnisseiten pro Suchbegriff (à 40, per Scrollen; meist ~2 verfügbar)")
     common(p_run)
 
     p_crawl = sub.add_parser("crawl", help="Nur Joybuy-Produkte holen")

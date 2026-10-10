@@ -42,6 +42,10 @@ class Browser:
         self._pw = None
         self.ctx: BrowserContext | None = None
         self._joybuy_warm = False
+        # one long-lived tab per competitor shop (see sources/shops.py "fast path")
+        self._warm: dict[str, Page] = {}
+        self._warm_locks: dict[str, asyncio.Lock] = {}
+        self._page_hooks: dict[str, list] = {}
 
     async def __aenter__(self) -> "Browser":
         _prepare_profile()
@@ -59,6 +63,11 @@ class Browser:
         return self
 
     async def __aexit__(self, *exc):
+        for p in list(self._warm.values()):
+            try:
+                await p.close()
+            except Exception:
+                pass
         if self.ctx:
             await self.ctx.close()
         if self._pw:
@@ -66,6 +75,45 @@ class Browser:
 
     def page(self):
         return _PageCM(self)
+
+    # ---- warm tabs ----
+    def has_warm(self, name: str) -> bool:
+        p = self._warm.get(name)
+        return bool(p and not p.is_closed())
+
+    def on_new_page(self, name: str, hook) -> None:
+        """Register a callback that is applied to the next warm tab created for `name`."""
+        self._page_hooks.setdefault(name, []).append(hook)
+
+    def drop_warm(self, name: str) -> None:
+        p = self._warm.pop(name, None)
+        if p and not p.is_closed():
+            asyncio.ensure_future(p.close())
+
+    async def warm(self, name: str, origin: str, setup=None) -> Page:
+        """Return the warm tab for a shop, creating (and preparing) it on first use."""
+        lock = self._warm_locks.setdefault(name, asyncio.Lock())
+        async with lock:
+            if self.has_warm(name):
+                return self._warm[name]
+            page = await self.ctx.new_page()
+            for hook in self._page_hooks.pop(name, []):
+                hook(page)
+            # the warm tab only needs HTML/JS – skip images, fonts and media
+            await page.route("**/*", _block_heavy)
+            await page.goto(origin, wait_until="domcontentloaded", timeout=45000)
+            if setup:
+                await setup(self, page)
+            self._warm[name] = page
+            log.debug("warm tab ready: %s", name)
+            return page
+
+
+async def _block_heavy(route):
+    if route.request.resource_type in ("image", "font", "media"):
+        await route.abort()
+    else:
+        await route.continue_()
 
 
 class _PageCM:

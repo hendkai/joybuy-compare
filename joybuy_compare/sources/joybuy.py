@@ -128,10 +128,34 @@ async def warmup(page) -> None:
     await page.wait_for_timeout(1500)
 
 
+def _collect(pl: dict, keyword: str, products: dict, categories: dict) -> tuple[int, int | None]:
+    """Merge one guide_search_getItems payload; returns (new items, total page count)."""
+    data = (pl or {}).get("data") or {}
+    fc = data.get("fieldCollection") or {}
+    for lvl, key in ((1, "categoryLv1List"), (2, "categoryLv2List"), (3, "categoryLv3List")):
+        for c in fc.get(key) or []:
+            if c.get("catId"):
+                categories[c["catId"]] = {"id": c["catId"], "name": c.get("catName"), "parent_id": c.get("parentId"), "level": lvl}
+    new = 0
+    for cv in data.get("completeViews") or []:
+        it = cv.get("itemCompleteView")
+        p = parse_item(it, keyword) if it else None
+        if p and p["sku"] not in products:
+            products[p["sku"]] = p
+            new += 1
+    page_info = ((data.get("head") or {}).get("summary") or {}).get("page") or {}
+    return new, page_info.get("pageCount")
+
+
 async def search(browser: Browser, keyword: str, pages: int = 2) -> tuple[list[dict], list[dict]]:
-    """Return (products, categories) for a keyword across `pages` result pages."""
+    """Return (products, categories) for a keyword, loading up to `pages` result pages (à 40 items).
+
+    Only the plain search URL is opened; further pages are loaded the way the website itself does it –
+    by scrolling (infinite scroll). URLs with `&page=` are disallowed in Joybuy's robots.txt.
+    """
     products: dict[str, dict] = {}
     categories: dict[str, dict] = {}
+    url = f"{BASE}/s?k={quote_plus(keyword)}"
 
     async with browser.page() as page:
         if not getattr(browser, "_joybuy_warm", False):
@@ -147,52 +171,38 @@ async def search(browser: Browser, keyword: str, pages: int = 2) -> tuple[list[d
                     pass
 
         page.on("response", on_resp)
-        for n in range(1, pages + 1):
-            url = f"{BASE}/s?k={quote_plus(keyword)}" + (f"&page={n}" if n > 1 else "")
-            before = len(payloads)
+        await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        if _is_blocked(page.url, await page.title()):
+            log.info("joybuy risk page – warming up and retrying")
+            await asyncio.sleep(5)
+            await warmup(page)
             await page.goto(url, wait_until="domcontentloaded", timeout=60000)
             if _is_blocked(page.url, await page.title()):
-                log.info("joybuy risk page – warming up and retrying")
-                await asyncio.sleep(5)
-                await warmup(page)
-                await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-                if _is_blocked(page.url, await page.title()):
-                    raise Blocked(f"Joybuy blocked request ({page.url[:100]}). Tipp: `jbc unblock` ausführen.")
-            await page.wait_for_timeout(2500)
-            for _ in range(5):
-                await page.mouse.wheel(0, 2500)
-                await page.wait_for_timeout(700)
-            for _ in range(10):
-                if len(payloads) > before:
+                raise Blocked(f"Joybuy blocked request ({page.url[:100]}). Tipp: `jbc unblock` ausführen.")
+        await page.wait_for_timeout(2500)
+        for card in _rsc_cards(await page.content()):  # first cards are server-rendered
+            p = parse_item(card, keyword)
+            if p:
+                products.setdefault(p["sku"], p)
+
+        seen = 0
+        total_pages = None
+        idle = 0
+        # scroll until `pages` result pages have been loaded or nothing new arrives
+        while len(payloads) < pages and idle < 6:
+            await page.mouse.wheel(0, 3000)
+            await page.wait_for_timeout(800)
+            if len(payloads) > seen:
+                for pl in payloads[seen:]:
+                    _, tp = _collect(pl, keyword, products, categories)
+                    total_pages = tp or total_pages
+                seen = len(payloads)
+                idle = 0
+                if total_pages and seen >= total_pages:
                     break
-                await page.wait_for_timeout(500)
-            new_items = 0
-            for pl in payloads[before:]:
-                data = (pl or {}).get("data") or {}
-                fc = data.get("fieldCollection") or {}
-                for lvl, key in ((1, "categoryLv1List"), (2, "categoryLv2List"), (3, "categoryLv3List")):
-                    for c in fc.get(key) or []:
-                        if c.get("catId"):
-                            categories[c["catId"]] = {"id": c["catId"], "name": c.get("catName"),
-                                                      "parent_id": c.get("parentId"), "level": lvl}
-                for cv in data.get("completeViews") or []:
-                    it = cv.get("itemCompleteView")
-                    if it:
-                        p = parse_item(it, keyword)
-                        if p and p["sku"] not in products:
-                            products[p["sku"]] = p
-                            new_items += 1
-                page_info = ((data.get("head") or {}).get("summary") or {}).get("page") or {}
-                if page_info.get("pageCount") and n >= page_info["pageCount"]:
-                    pages = n
-            if n == 1:
-                for card in _rsc_cards(await page.content()):
-                    p = parse_item(card, keyword)
-                    if p and p["sku"] not in products:
-                        products[p["sku"]] = p
-                        new_items += 1
-            log.info("joybuy %r page %d: +%d items", keyword, n, new_items)
-            if new_items == 0 or n >= pages:
-                break
-            await asyncio.sleep(1.0)
+            else:
+                idle += 1
+        for pl in payloads[seen:]:
+            _collect(pl, keyword, products, categories)
+        log.info("joybuy %r: %d Seiten geladen, %d Artikel", keyword, len(payloads), len(products))
     return list(products.values()), list(categories.values())

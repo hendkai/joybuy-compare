@@ -15,7 +15,6 @@ from .sources.shops import GROCERY_SHOPS, SHOPS, ShopBlocked, search_with_retry
 
 log = logging.getLogger(__name__)
 STATUS_FILE = config.DATA_DIR / "status.json"
-MIN_INTERVAL = {"amazon": 4.0, "idealo": 2.5, "rewe": 1.5, "dm": 1.0, "aldi_sued": 1.5, "aldi_nord": 1.5, "lidl": 1.0}
 
 
 def write_status(**kw) -> None:
@@ -65,14 +64,31 @@ def _sales(text: str | None) -> float:
 
 
 class _Throttle:
+    """Per-shop politeness delay + a per-run cache, so identical searches (e.g. 'Nutella' on ALDI for several
+    Joybuy articles) hit the shop only once."""
+
     def __init__(self):
         self.locks = {s: asyncio.Lock() for s in SHOPS}
         self.last = {s: 0.0 for s in SHOPS}
+        self.cache: dict[tuple[str, str], asyncio.Future] = {}
+
+    async def search(self, browser: Browser, shop: str, query: str) -> list[dict]:
+        key = (shop, query.lower())
+        fut = self.cache.get(key)
+        if fut is None:
+            fut = self.cache[key] = asyncio.get_running_loop().create_future()
+            try:
+                await self.wait(shop)
+                fut.set_result(await search_with_retry(SHOPS[shop], browser, query))
+            except BaseException as e:
+                fut.set_exception(e)
+                del self.cache[key]
+        return list(await asyncio.shield(fut))
 
     async def wait(self, shop: str):
         async with self.locks[shop]:
             delta = time.monotonic() - self.last[shop]
-            gap = MIN_INTERVAL.get(shop, 2.0)
+            gap = SHOPS[shop].min_interval
             if delta < gap:
                 await asyncio.sleep(gap - delta)
             self.last[shop] = time.monotonic()
@@ -101,6 +117,8 @@ def queries_for(shop: str, p: dict) -> list[str]:
     if shop in ("aldi_sued", "aldi_nord"):
         # ALDI search only finds something with one or two plain words
         qs = [search_query(t, b, max_tokens=2, with_size=False), search_query(t, b, max_tokens=1, with_size=False)]
+    elif shop == "dm":  # heavily rate-limited: one query only
+        qs = [search_query(t, b, max_tokens=4)]
     elif shop in GROCERY_SHOPS:
         qs = [search_query(t, b, max_tokens=4), search_query(t, b, max_tokens=2)]
     else:
@@ -114,9 +132,8 @@ async def search_and_match(browser: Browser, shop: str, p: dict, throttle: "_Thr
     raw: list[dict] = []
     query = ""
     for query in queries_for(shop, p):
-        if throttle:
-            await throttle.wait(shop)
-        found = await search_with_retry(SHOPS[shop], browser, query)
+        found = await (throttle.search(browser, shop, query) if throttle
+                       else search_with_retry(SHOPS[shop], browser, query))
         raw += found
         best = pick_best(p, raw)
         if best:
@@ -143,29 +160,32 @@ async def compare(browser: Browser, shops: list[str], limit: int | None = None, 
     done = 0
     write_status(phase="compare", step="Vergleiche Preise", done=0, total=len(products))
 
+    async def one_shop(p: dict, s: str):
+        if s in blocked:
+            return
+        try:
+            query, raw, best = await search_and_match(browser, s, p, throttle)
+        except ShopBlocked as e:
+            if s not in blocked:
+                log.error("%s blocked us (%s) – skipping it for this run", s, e)
+            blocked.add(s)
+            return
+        except Exception:
+            with db.session() as con:
+                db.save_offer(con, p["sku"], s, None, search_query(p["title"], p.get("brand")), "error")
+            return
+        with db.session() as con:
+            db.save_offer(con, p["sku"], s, best, query, "match" if best else "nomatch", raw)
+        if best:
+            log.info("  %-9s %6.2f€ vs JB %6.2f€ [%s %.0f] %s", s, best["comparable_price"], p["price"],
+                     best["match_kind"], best["score"], best["title"][:60])
+
     async def one(p: dict):
         nonlocal done
         q = jb_quantity(p["title"], p.get("price"), p.get("unit_price_text"))
-        for s in shops:
-            if s in blocked:
-                continue
-            if s in GROCERY_SHOPS and not (q and q.dimension in ("mass", "volume")):
-                continue
-            try:
-                query, raw, best = await search_and_match(browser, s, p, throttle)
-            except ShopBlocked as e:
-                log.error("%s blocked us (%s) – skipping it for this run", s, e)
-                blocked.add(s)
-                continue
-            except Exception:
-                with db.session() as con:
-                    db.save_offer(con, p["sku"], s, None, search_query(p["title"], p.get("brand")), "error")
-                continue
-            with db.session() as con:
-                db.save_offer(con, p["sku"], s, best, query, "match" if best else "nomatch", raw)
-            if best:
-                log.info("  %-7s %6.2f€ vs JB %6.2f€ [%s %.0f] %s", s, best["comparable_price"], p["price"],
-                         best["match_kind"], best["score"], best["title"][:60])
+        todo = [s for s in shops if not (s in GROCERY_SHOPS and not (q and q.dimension in ("mass", "volume")))]
+        # all shops of one product in parallel; per-shop throttling keeps it polite
+        await asyncio.gather(*(one_shop(p, s) for s in todo))
         with db.session() as con:
             con.execute("UPDATE products SET compared_at=? WHERE sku=?", (time.time(), p["sku"]))
         done += 1
@@ -208,7 +228,7 @@ def rematch() -> tuple[int, int]:
 
 
 async def run(keywords: list[str] | None, pages: int, shops: list[str], limit: int | None, max_age_h: float,
-              parallel: int = 3, skip_joybuy: bool = False, skip_compare: bool = False) -> None:
+              parallel: int = 6, skip_joybuy: bool = False, skip_compare: bool = False) -> None:
     write_status(running=True, started_at=time.time(), error=None, phase="start", done=0, total=0)
     try:
         async with Browser(parallel=parallel) as browser:

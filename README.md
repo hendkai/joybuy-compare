@@ -1,7 +1,10 @@
 # JoyCheck – Joybuy-Preisvergleich
 
+> ⚠️ Privates Hobbyprojekt. Mehrere Shops untersagen automatisierten Zugriff in ihren AGB – bitte vor der Nutzung den
+> [rechtlichen Hinweis](#️-rechtlicher-hinweis--disclaimer) lesen.
+
 Ist [Joybuy.de](https://www.joybuy.de) (JD.com Europa) wirklich günstiger? **JoyCheck** crawlt Joybuy-Artikel,
-sucht dieselben Produkte bei **Amazon, REWE, dm, ALDI SÜD, ALDI Nord, Lidl und idealo** und zeigt alles in einer Webshop-Oberfläche –
+sucht dieselben Produkte bei **Amazon, REWE, ALDI SÜD, ALDI Nord, Lidl und idealo** (optional dm) und zeigt alles in einer Webshop-Oberfläche –
 mit Filtern für „Joybuy günstiger“, Mindest-Ersparnis, Joybuy-Rabatt (UVP), Kategorie, Preis und Shop.
 
 ![Screenshot](docs/screenshot.png)
@@ -101,6 +104,13 @@ joybuy_compare/
 
 - Joybuy liefert **keine EAN**, daher wird über Titel gematcht: Marke muss vorkommen, Modellnummern (z. B. `WH-1000XM5`)
   müssen übereinstimmen, die Wortabdeckung muss passen. Gleiche Packungsgröße wird bevorzugt, sonst Grundpreis-Vergleich.
+- **Tempo**: Pro Shop bleibt ein Browser-Tab geöffnet; Suchen laufen per `fetch()` in diesem Tab (keine Seiten-Renderings,
+  0,1–1,5 s pro Suche), alle Shops eines Artikels parallel, identische Suchanfragen werden pro Lauf nur einmal gestellt.
+  Gemessen: 40 Artikel in 83 s (vorher ~9 s pro Artikel). Fällt der schnelle Weg aus, wird die Seite klassisch geladen.
+- **dm** ist standardmäßig aus: die Such-API lässt nur ca. eine Anfrage pro 6 s zu (sonst Sperre). Aktivieren mit
+  `--shops amazon,rewe,aldi_sued,aldi_nord,lidl,idealo,dm`.
+- **Joybuy**: pro Suchbegriff wird nur die normale Suchseite geöffnet (~80 Artikel); Blätter-URLs (`&page=`) sind laut
+  robots.txt gesperrt und werden nicht genutzt – mehr Abdeckung über mehr Suchbegriffe.
 - REWE, dm, ALDI SÜD und ALDI Nord werden nur für Artikel mit Gewichts-/Volumenangabe abgefragt (Lebensmittel/Drogerie).
   ALDI findet nur mit sehr kurzen Suchbegriffen etwas (Marke + 1 Wort, notfalls nur Marke).
 - **Lidl**: lidl.de verkauft online fast nur Non-Food, Getränke-Aktionen und Wein – normale Lebensmittelpreise gibt es nur
@@ -113,10 +123,43 @@ joybuy_compare/
 - Ein echter Chromium (Playwright, „new headless“) wird verwendet, da alle Shops Bot-Schutz haben. Zwischen Anfragen an
   denselben Shop wird gedrosselt. Blockt ein Shop (Captcha), wird er für den restlichen Lauf übersprungen.
 
+## ⚠️ Rechtlicher Hinweis / Disclaimer
+
+**Dieses Projekt ist ein privates, nicht-kommerzielles Hobby-/Lernprojekt. Es ist keine Rechtsberatung, und die Nutzung
+erfolgt auf eigenes Risiko.** Es besteht keine Verbindung zu Joybuy/JD.com, Amazon, REWE, dm, ALDI SÜD, ALDI Nord, Lidl
+oder idealo. Alle Marken gehören ihren jeweiligen Inhabern.
+
+Mehrere der abgefragten Shops **untersagen in ihren AGB/Nutzungsbedingungen ausdrücklich den automatisierten Zugriff**
+(Stand der Prüfung: Oktober 2026, Auszüge wörtlich):
+
+| Shop | Regelung zu automatisiertem Zugriff | robots.txt für die genutzten Such-URLs |
+|---|---|---|
+| **Joybuy** ([AGB 15.5](https://www.joybuy.de/help/terms-conditions)) | ❌ „Keine Person darf Roboter, Spider, Scraper, Data-Mining-Tools oder andere automatisierte Mittel verwenden, um zu irgendeinem Zweck auf Joybuy zuzugreifen, ohne unsere ausdrückliche vorherige schriftliche Genehmigung.“ | `/s?k=…` erlaubt, Blättern (`&page=`) gesperrt |
+| **Amazon** ([AGB](https://www.amazon.de/gp/help/customer/display.html?nodeId=201909000)) | ❌ „… kein Data Mining, keine Robots oder ähnliche Datensammel- und Extraktionsprogramme einsetzen, um irgendwelche wesentlichen Teile eines Amazon Services zur Wiederverwendung zu extrahieren“; die Lizenz umfasst keine „Erfassung und Nutzung von Produktinformationen, Beschreibungen oder Preisen“ | Suche `/s` nicht gesperrt |
+| **idealo** ([AGB](https://www.idealo.de/legal/agb)) | ❌ „Insbesondere dürfen Nutzende nicht automatisiert auf die Vergleichsportale zugreifen. Dies umfasst vor allem Scraping.“ / „Ein Auslesen oder Ausspähen der Datenbank mittels anderer Software ist nicht gestattet.“ | nicht abrufbar (403) |
+| **REWE** ([Nutzungsbedingungen](https://www.rewe.de/service/nutzungsbedingungen/), [AGB](https://www.rewe.de/service/agb/)) | keine ausdrückliche Klausel gefunden (Bedingungen betreffen Kundenkonto, App und Bestellungen) | `?search=` **gesperrt** |
+| **dm** ([Nutzungsbedingungen](https://www.dm.de/nutzungsbedingungen-v10-3110528), [AGB](https://www.dm.de/agb-43976)) | keine ausdrückliche Klausel gefunden; die Such-API wird aber technisch stark gedrosselt (daher standardmäßig deaktiviert) | `/search` **gesperrt** |
+| **ALDI SÜD** ([Nutzungsbedingungen](https://www.aldi-sued.de/unternehmen/nutzungsbedingungen/neu)) | keine ausdrückliche Klausel gefunden (betrifft das Kundenkonto) | nicht abrufbar (403) |
+| **ALDI Nord** ([Impressum](https://www.aldi-nord.de/kundeninformationen/impressum.html)) | keine Nutzungsbedingungen zur Website gefunden | Suche nicht gesperrt |
+| **Lidl** ([AGB Onlineshop](https://www.lidl.de/c/allgemeine-geschaeftsbedingungen-onlineshop/s10005181)) | keine ausdrückliche Klausel gefunden (betrifft Bestellungen) | `*search?q=*` **gesperrt** (genutzt wird `/q/api/search`) |
+
+„Keine Klausel gefunden“ heißt nur, dass bei einer automatisierten Stichwortsuche in den verlinkten Texten nichts dazu
+gefunden wurde – nicht, dass Scraping dort erlaubt ist. Daneben können z. B. das Datenbankherstellerrecht (§§ 87a ff.
+UrhG) und das Umgehen technischer Schutzmaßnahmen (Captchas, Bot-Erkennung) rechtlich relevant sein.
+
+**Wer das Tool nutzt, ist selbst dafür verantwortlich**, die jeweils aktuellen Bedingungen zu prüfen und einzuhalten.
+Empfehlungen, falls du es trotzdem privat einsetzt:
+
+- nur für den **eigenen, privaten Preisvergleich** verwenden – keine Veröffentlichung, kein Weiterverkauf, kein öffentliches
+  Hosting der gesammelten Daten oder der Web-UI
+- **moderat** abfragen (Drosselung nicht entfernen, Auto-Update höchstens täglich bis alle 6 h) und Shops, deren Bedingungen
+  du nicht akzeptieren willst, mit `--shops` abwählen
+- bei Captchas/Sperren **nicht umgehen**, sondern pausieren
+- für kommerzielle Nutzung offizielle Schnittstellen bzw. eine schriftliche Genehmigung einholen (z. B. Amazon
+  Product Advertising API)
+
 ## Hinweise
 
-- Inoffizielles Hobby-Projekt, nicht mit Joybuy, JD.com, Amazon, REWE, dm oder idealo verbunden.
-  Bitte die Nutzungsbedingungen der Shops beachten und moderat crawlen (z. B. 1× täglich).
 - Matching ist heuristisch – die Detailansicht zeigt Match-Art und -Score, damit man Ausreißer erkennt.
 - Preise ohne Versandkosten; Joybuy-Preise können vom Login/Neukunden-Gutscheinen abweichen.
 

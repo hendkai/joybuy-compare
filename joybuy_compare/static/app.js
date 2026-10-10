@@ -344,7 +344,6 @@ function bind() {
       keywords: $("#rfKeywords").value.split("\n").map((s) => s.trim()).filter(Boolean),
       pages: +$("#rfPages").value || 2,
       limit: +$("#rfLimit").value || null,
-      shops: state.shops.join(","),
     };
     const r = await fetch("/api/refresh", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     if (!r.ok) alert((await r.json()).detail || "Fehler");
